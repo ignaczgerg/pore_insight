@@ -6,7 +6,7 @@ from unittest.mock import patch
 class TestExperimentalData(unittest.TestCase):
     @patch('pandas.read_excel')
     def test_experimental_data_loading(self, mock_read_excel):
-        # Mock data
+
         mock_read_excel.return_value = pd.DataFrame({
             'Molecular Weight (g mol-1)': [100, 200],
             'Rejection (%)': [50, 70],
