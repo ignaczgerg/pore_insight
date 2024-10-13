@@ -9,3 +9,6 @@ class MolarVolumeRelation:
     def relation_vs_b(x):
         return -0.0002 * (x**2) + 1.3472 * x - 4.8372
 
+    @staticmethod
+    def new_relation(x):
+        pass 
