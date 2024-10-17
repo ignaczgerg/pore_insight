@@ -1,8 +1,208 @@
 import numpy as np
+from scipy.optimize import curve_fit
 import rdkit
 from rdkit import Chem
 from rdkit.Chem import Descriptors
 
+
+class MWCOFitting:
+    def __init__(self, mw, rejection, error):
+        self.mw = mw
+        self.rejection = rejection
+        self.error = error
+
+    @staticmethod
+    def model_f(x, a, b, c, d):
+        return b + (a - b) / (1 + np.exp((x - c) / d))
+    
+    @staticmethod
+    def sigmoid(x, a, b, c):
+        return c / (1 + np.exp(-a * (x - b)))
+
+    @staticmethod
+    def generalized_logistic(x, A, K, B, Q, C, nu):
+        return A + (K - A) / (C + Q * np.exp(-B * x))**(1 / nu)
+
+    @staticmethod
+    def gompertz(x, a, b, c):
+        return a * np.exp(-b * np.exp(-c * x))
+
+    @staticmethod
+    def double_sigmoid(x, K1, B1, M1, K2, B2, M2):
+        return (K1 / (1 + np.exp(-B1 * (x - M1)))) + (K2 / (1 + np.exp(-B2 * (x - M2))))
+
+    def fit_curve(self, model_name='model_f'):
+        """
+        Fit the curve using the specified model function.
+
+        Parameters
+        ----------
+        model_name : str, optional
+            The name of the model function to use for fitting. Options are: 
+            'model_f', 'sigmoid', 'generalized_logistic', 'gompertz', 'double_sigmoid'.
+            Default is 'model_f'.
+
+        Returns
+        -------
+        mw_range : array-like
+            Molecular weight range for plotting.
+        fitted_curve : array-like
+            Fitted curve values.
+        """
+        model_functions = {
+            'model_f': self.model_f,
+            'sigmoid': self.sigmoid,
+            'generalized_logistic': self.generalized_logistic,
+            'gompertz': self.gompertz,
+            'double_sigmoid': self.double_sigmoid
+        }
+
+        if model_name not in model_functions:
+            raise ValueError(f"Model '{model_name}' is not recognized. Choose from: {list(model_functions.keys())}")
+
+        model_function = model_functions[model_name]
+
+        initial_params = {
+            'model_f': [-10, 1, np.median(self.mw), 1],  
+            'sigmoid': [0.1, np.median(self.mw), 1],
+            'generalized_logistic': [1, 1, 1, 1, 1, 1],
+            'gompertz': [1, 1, 1],
+            'double_sigmoid': [1, 1, np.median(self.mw), 1, 1, np.median(self.mw)]
+        }
+
+        bounds = {
+            'model_f': ([-np.inf, 0, 0, 0], [np.inf, np.inf, np.inf, np.inf]),
+            'sigmoid': ([0, 0, 0], [np.inf, np.inf, np.inf]),
+            'generalized_logistic': ([0, 0, 0, 0, 0, 0], [np.inf, np.inf, np.inf, np.inf, np.inf, np.inf]),
+            'gompertz': ([0, 0, 0], [np.inf, np.inf, np.inf]),
+            'double_sigmoid': ([0, 0, 0, 0, 0, 0], [np.inf, np.inf, np.inf, np.inf, np.inf, np.inf])
+        }
+
+        p0 = initial_params[model_name]
+        bound = bounds[model_name]
+
+        mw_range = np.linspace(min(self.mw), max(self.mw), 100)
+        popt, _ = curve_fit(model_function, self.mw, self.rejection, p0=p0, bounds=bound, maxfev=10000)  
+        
+        fitted_curve = model_function(mw_range, *popt)
+        
+        return mw_range, fitted_curve
+
+
+
+class PoreSizeDistribution:
+    @staticmethod
+    def calculate_psd(x, avg_r, std_dev):
+        """
+        Calculates the pore size distribution using the log-normal distribution.
+        
+        Parameters
+        ----------
+        x : array-like
+            Pore sizes.
+        avg_r : float
+            Average pore size radius.
+        std_dev : float
+            Standard deviation of the pore size distribution.
+
+        Returns
+        -------
+        psd : array-like
+            Calculated pore size distribution.
+        """
+        b = np.log(1 + (std_dev / avg_r)**2)
+        c1 = 1 / np.sqrt(2 * np.pi * b)
+        return c1 * (1 / x) * np.exp(-((np.log(x / avg_r) + b / 2)**2) / (2 * b)) 
+
+    @staticmethod
+    def derivative_sigmoid(x, a, b, c):
+        """
+        Derivative of the Sigmoid function.
+        
+        Parameters
+        ----------
+        x : array-like
+            Input values.
+        a : float
+            Steepness of the curve.
+        b : float
+            Midpoint of the curve.
+        c : float
+            Maximum value of the sigmoid.
+
+        Returns
+        -------
+        array-like
+            Derivative of the sigmoid at each point in x.
+        """
+        sigmoid_value = MWCOFitting.sigmoid(x, a, b, c)
+        return a * sigmoid_value * (1 - sigmoid_value / c)
+
+    @staticmethod
+    def derivative_generalized_logistic(x, A, K, B, Q, C, nu):
+        """
+        Derivative of the Generalized Logistic function.
+
+        Parameters
+        ----------
+        x : array-like
+            Input values.
+        A, K, B, Q, C, nu : float
+            Parameters of the generalized logistic function.
+
+        Returns
+        -------
+        array-like
+            Derivative of the generalized logistic function at each point in x.
+        """
+        numerator = (K - A) * (-B) * Q * np.exp(-B * x)
+        denominator = nu * (C + Q * np.exp(-B * x))**(1 / nu + 1)
+        return numerator / denominator
+
+    @staticmethod
+    def derivative_gompertz(x, a, b, c):
+        """
+        Derivative of the Gompertz function.
+
+        Parameters
+        ----------
+        x : array-like
+            Input values.
+        a, b, c : float
+            Parameters of the Gompertz function.
+
+        Returns
+        -------
+        array-like
+            Derivative of the Gompertz function at each point in x.
+        """
+        return a * b * np.exp(-b * np.exp(-c * x)) * np.exp(-c * x)
+    
+    @staticmethod
+    def derivative_double_sigmoid(x, K1, B1, M1, K2, B2, M2):
+        """
+        Derivative of the Double Sigmoid function.
+
+        Parameters
+        ----------
+        x : array-like
+            Input values.
+        K1, B1, M1 : float
+            Parameters for the first sigmoid function.
+        K2, B2, M2 : float
+            Parameters for the second sigmoid function.
+
+        Returns
+        -------
+        array-like
+            Derivative of the double sigmoid function at each point in x.
+        """
+        term1 = (K1 * B1 * np.exp(-B1 * (x - M1))) / ((1 + np.exp(-B1 * (x - M1)))**2)
+        term2 = (K2 * B2 * np.exp(-B2 * (x - M2))) / ((1 + np.exp(-B2 * (x - M2)))**2)
+        return term1 + term2
+    
+
+    
 class MolarVolumeRelation:
     @staticmethod
     def relation_vs_a(x):
