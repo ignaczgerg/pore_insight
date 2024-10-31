@@ -86,7 +86,7 @@ class MWCOFitting:
         
         fitted_curve = model_function(mw_range, *popt)
         
-        return mw_range, fitted_curve
+        return mw_range, fitted_curve, popt
 
 
 
@@ -208,6 +208,7 @@ class MolarVolumeRelation:
     def relation_vs_a(x):
         """
         Estimate the molar volume of a molecule based on its molecular weight using a linear relation (method a).
+        Method a: Schotte et al. group contribution theory
 
         Parameters
         ----------
@@ -217,13 +218,19 @@ class MolarVolumeRelation:
         Returns
         -------
         float
+
+        References
+        ----------
+        - William Schotte, Prediction of the molar volume at the normal boiling point, The Chemical Engineering Journal, Volume 48, Issue 3, 1992, Pages 167-172, ISSN 0300-9467
+        - https://doi.org/10.1016/0300-9467(92)80032-6
         """
-        return 1.1471 * x + 11.248
+        return 1.3348 * x - 10.552
 
     @staticmethod
     def relation_vs_b(x):
         """
         Estimate the molar volume of a molecule based on its molecular weight using a linear relation (method b).
+        Method b: Wu et al. group contribution theory
 
         Parameters
         ----------
@@ -233,8 +240,13 @@ class MolarVolumeRelation:
         Returns
         -------
         float
+
+        References
+        ----------
+        - Albert X. Wu, Sharon Lin, Katherine Mizrahi Rodriguez, Francesco M. Benedetti, Taigyu Joo, Aristotle F. Grosz, Kayla R. Storme, Naksha Roy, Duha Syar, Zachary P. Smith, Revisiting group contribution theory for estimating fractional free volume of microporous polymer membranes, Journal of Membrane Science, Volume 636, 2021, 119526, ISSN 0376-7388
+        - https://doi.org/10.1016/j.memsci.2021.119526
         """
-        return -0.0002 * (x**2) + 1.3472 * x - 4.8372
+        return 1.1353*x + 3.8219
 
     @staticmethod
     def joback(SMILES):
