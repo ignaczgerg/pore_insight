@@ -1,4 +1,5 @@
 import numpy as np
+import matplotlib.pyplot as plt
 
 from fitting_models import MWCOFitting, PoreSizeDistribution, MolarVolumeRelation
 from utils import StokesRadiusCalculator, DiffusivityCalculator, Solvent
@@ -9,7 +10,7 @@ def main():
     errors = np.zeros_like(rejections)
 
     mwco_fitting = MWCOFitting(molecular_weights, rejections, errors)
-    mw_range, fitted_curve = mwco_fitting.fit_curve('model_f')
+    mw_range, fitted_curve, _ = mwco_fitting.fit_curve('model_f')
 
     print("MWCO Curve Fit:")
     print("Molecular Weights Range:", mw_range)
