@@ -1,0 +1,50 @@
+Rifan (2024), Table S2, M4. MetOH 25C 0.543 cP
+molecular_weights = [236.4,272.38,327.33,422.92,435.52,540.51,585.54,837.05,1017.65] #g mol-1
+rejections = [4.38,4.79,8.68,11.76,17.56,50.92,58.8,88.39,94.82] #%
+errors = np.zeros_like(rejections)
+
+Joback
+Rifan (2024), Table S2, M4. MetOH 25C 0.543 cP
+smiles = {
+    'Styrene Dimer': ('CC(C)(CC(=C)c1ccccc1)c2ccccc2'),
+    'Estradiol': ('OC(C=C1)=CC2=C1[C@@]3([H])CC[C@]4(C)[C@@H](O)CC[C@@]4([H])[C@]3([H])CC2'),
+    'Methyl Orange': ('[O-]S(C1=CC=C(/N=N/C2=CC=C(N(C)C)C=C2)C=C1)(=O)=O.[Na+]'),
+    'Losartan': ('OCC1=C(N=C(N1CC2=CC=C(C3=C(C4=NN=NN4)C=CC=C3)C=C2)CCCC)Cl'),
+    'Valsartan': ('CC([C@H](N(CC1=CC=C(C2=C(C3=NN=NN3)C=CC=C2)C=C1)C(CCCC)=O)C(O)=O)C'),
+    'Oleuropein': ('OC1=C(O)C=C(CCOC(C[C@@]2([H])/C([C@H](OC3[C@@H]([C@H]([C@@H]([C@@H](CO)O3)O)O)O)OC=C2C(OC)=O)=C\C)=O)C=C1'),
+    'Acid fuchsin': ('CC1=C/C(=C(/C2=CC(=C(C=C2)N)S(=O)(=O)O)\C3=CC(=C(C=C3)N)S(=O)(=O)[O-])/C=C(C1=N)S(=O)(=O)[O-].[Na+].[Na+]'),
+    'Roxithromycin': ('CC[C@@H]1[C@@]([C@@H]([C@H](C(=NOCOCCOC)[C@@H](C[C@@]([C@@H]([C@H]([C@@H]([C@H](C(=O)O1)C)O[C@H]2C[C@@]([C@H]([C@@H](O2)C)O)(C)OC)C)O[C@H]3[C@@H]([C@H](C[C@H](O3)C)N(C)C)O)(C)O)C)C)O)(C)O'),
+    'Rose Bengal': ('O=C1OC2(C3=C(OC4=C2C=C(I)C([O-])=C4I)C(I)=C([O-])C(I)=C3)C5=C1C(Cl)=C(Cl)C(Cl)=C5Cl.[Na+].[Na+]')
+}
+
+Rifan's presentation on PSD
+molecular_weights = [239.25501,275.07163,328.08023,425.50143,436.96275,541.54728,587.39255,838.10888]
+rejections = [74.025,81.65629,85.19928,94.59583,95.65951,98.48285,99.00757,99.4959]
+errors = np.zeros_like(rejections)
+
+Shaoxiao Liu (2023). Ethanol 25C 1.07 cP
+molecular_weights = [350.9,479,647.9,825,1017.8] #g mol-1
+rejections = [86.44,98.36,97.6,98.53,96.54] #%
+errors = np.zeros_like(rejections)
+
+Mengfang Wang (2024). Methanol 25C 0.543 cP
+molecular_weights = [138.1,214.2,327.3,416.4,452.4,479,604.5,826] #g mol-1
+rejections = [33.9,71.97,92.68,95.6,97.3,97,98.15,98.74] #%
+errors = np.zeros_like(rejections)
+
+Ruo-yu Fu (2023). Water 25C 0.890 cP https://doi.org/10.1016/j.desal.2022.116318
+molecular_weights = [92, 122, 150,180] #g mol-1
+rejections = [37.96,47.96,54.84,62.96] #%
+errors = np.zeros_like(rejections)
+
+Ruo-yu Fu (2023). Water 25C 0.890 cP
+smiles = {
+    'Glycerin': ('C(C(CO)O)O'),
+    'Erythritol': ('C([C@H]([C@H](CO)O)O)O'),
+    'Xylose': ('C1[C@H]([C@@H]([C@H](C(O1)O)O)O)O'),
+    'Glucose': ('C([C@@H]1[C@H]([C@@H]([C@H](C(O1)O)O)O)O)O')
+}
+
+solvent = Solvent.from_selection(2,298.15,0.543) #MetOH
+solvent = Solvent.from_selection(3,298.15,1.07) #Ethanol
+solvent = Solvent.from_selection(1,298.15,0.89) #Water

@@ -1,6 +1,6 @@
 import unittest
 import numpy as np
-from mwco_fitting import MWCOFitting
+from fitting_models import curve_fitting
 
 class TestMWCOFitting(unittest.TestCase):
     def test_fit_curve(self):
@@ -9,8 +9,8 @@ class TestMWCOFitting(unittest.TestCase):
         rejection = [40, 60, 80, 90]
         error = [5, 5, 5, 5]
         
-        fitting = MWCOFitting(mw, rejection, error)
-        mw_range, fitted_curve = fitting.fit_curve()
+        fitting = curve_fitting(mw, rejection, error)
+        mw_range, fitted_curve, _, _, _ = fitting.fit_curve()
         
         self.assertEqual(len(mw_range), 100)
         self.assertTrue(np.all(fitted_curve < 100)) 
