@@ -4,15 +4,104 @@ import rdkit
 from rdkit import Chem
 from rdkit.Chem import Descriptors
 
-
-class MWCOFitting:
-    def __init__(self, mw, rejection, error):
-        self.mw = mw
-        self.rejection = rejection
-        self.error = error
-
+class misc:
     @staticmethod
-    def model_f(x, a, b, c, d):
+    def rej_bounds(rejection,error):
+        """
+        Estimates the lower and higher bounds based on rejection errors. Array-like objects should be of the same size.
+
+        Parameters
+        ----------
+        rejection : array-like
+            Experimental rejection points.
+        error : array-like
+            Experimental rejection error points (+/-).
+
+        Returns
+        -------
+        rej_low : array-like
+            Rejection points in the low bound of error (+).
+        rej_high : array-like
+            Rejection points in the high bound of error (-).
+        """
+
+        rej_low = []
+        rej_high = []
+        for i in range(0,len(rejection)):
+            l = rejection[i] + error[i]
+            h = rejection[i] - error[i]
+            rej_low.append(l)
+            rej_high.append(h)
+
+        return rej_low, rej_high
+    
+    @staticmethod
+    def intp90(r_values,rej_lst):
+        """
+        Estimates the radius or molecular weight (x value) value at 90% rejection (y value).
+
+        Parameters
+        ----------
+        rej_lst : array-like
+            List of fitted rejections.
+        x : array-like
+            Radius range obtained from the curve fitting.
+
+        Returns
+        ----------
+        x_90 : float or str
+            Radius or molecular weight float value at 90% rejection.
+            If the curve does not reach 90%, str value "N/A" will be returned and discarded from calculations.
+        """
+
+        if rej_lst[-1] > 90:
+            for i in range(0,len(rej_lst)):
+                if rej_lst[i] > 90:
+                    y1 = rej_lst[i-1]
+                    y2 = rej_lst[i]
+                    x1 = r_values[i-1]
+                    x2 = r_values[i]
+                    
+                    x_90 = x1 + ((90-y1)/(y2-y1))*(x2-x1)
+                    break
+        elif rej_lst[-1] == 90:
+            x_90 = rej_lst[-1]
+        else:
+            x_90 = str("N/A")
+        
+        return x_90
+    
+    @staticmethod
+    def rmvstr(lst):
+        """
+        Removes any str value from a list.
+
+        Parameters
+        ----------
+        lst : array-like
+            List of values
+
+        Returns
+        ----------
+        lst : array-lie
+            Same list without str value(s)
+        """
+        new_lst = []
+        for i in lst:
+            if type(i) != str:
+                new_lst.append(i)
+
+        return new_lst
+
+
+class curve_fitting:
+    def __init__(self, x_values, rejection,errors=None):
+        self.x_values = x_values
+        self.rejection = rejection
+        self.errors = errors
+      
+    @staticmethod
+    def boltzmann(x, a, b, c, d):
         return b + (a - b) / (1 + np.exp((x - c) / d))
     
     @staticmethod
@@ -31,7 +120,7 @@ class MWCOFitting:
     def double_sigmoid(x, K1, B1, M1, K2, B2, M2):
         return (K1 / (1 + np.exp(-B1 * (x - M1)))) + (K2 / (1 + np.exp(-B2 * (x - M2))))
 
-    def fit_curve(self, model_name='model_f'):
+    def fit_curve(self, model_name='boltzmann'):
         """
         Fit the curve using the specified model function.
 
@@ -39,18 +128,18 @@ class MWCOFitting:
         ----------
         model_name : str, optional
             The name of the model function to use for fitting. Options are: 
-            'model_f', 'sigmoid', 'generalized_logistic', 'gompertz', 'double_sigmoid'.
-            Default is 'model_f'.
+            'boltzmann', 'sigmoid', 'generalized_logistic', 'gompertz', 'double_sigmoid'.
+            Default is 'boltzmann'.
 
         Returns
         -------
-        mw_range : array-like
-            Molecular weight range for plotting.
+        x_range : array-like
+            x values range for plotting.
         fitted_curve : array-like
             Fitted curve values.
         """
         model_functions = {
-            'model_f': self.model_f,
+            'boltzmann': self.boltzmann,
             'sigmoid': self.sigmoid,
             'generalized_logistic': self.generalized_logistic,
             'gompertz': self.gompertz,
@@ -63,15 +152,15 @@ class MWCOFitting:
         model_function = model_functions[model_name]
 
         initial_params = {
-            'model_f': [-10, 1, np.median(self.mw), 1],  
-            'sigmoid': [0.1, np.median(self.mw), 1],
+            'boltzmann': [-10, 1, np.median(self.x_values), 1],  
+            'sigmoid': [0.1, np.median(self.x_values), 1],
             'generalized_logistic': [1, 1, 1, 1, 1, 1],
             'gompertz': [1, 1, 1],
-            'double_sigmoid': [1, 1, np.median(self.mw), 1, 1, np.median(self.mw)]
+            'double_sigmoid': [1, 1, np.median(self.x_values), 1, 1, np.median(self.x_values)]
         }
 
         bounds = {
-            'model_f': ([-np.inf, 0, 0, 0], [np.inf, np.inf, np.inf, np.inf]),
+            'boltzmann': ([-np.inf, 0, 0, 0], [np.inf, np.inf, np.inf, np.inf]),
             'sigmoid': ([0, 0, 0], [np.inf, np.inf, np.inf]),
             'generalized_logistic': ([0, 0, 0, 0, 0, 0], [np.inf, np.inf, np.inf, np.inf, np.inf, np.inf]),
             'gompertz': ([0, 0, 0], [np.inf, np.inf, np.inf]),
@@ -81,20 +170,31 @@ class MWCOFitting:
         p0 = initial_params[model_name]
         bound = bounds[model_name]
 
-        mw_range = np.linspace(min(self.mw), max(self.mw), 100)
-        popt, _ = curve_fit(model_function, self.mw, self.rejection, p0=p0, bounds=bound, maxfev=10000)  
+        x_range = np.linspace(0,max(self.x_values)*2,100)
+        popt, _ = curve_fit(model_function, self.x_values, self.rejection, p0=p0, bounds=bound, maxfev=10000)  
         
-        fitted_curve = model_function(mw_range, *popt)
-        
-        return mw_range, fitted_curve, popt
+        fitted_curve = model_function(x_range, *popt)
+
+        low_fit, high_fit = None, None
+        if self.errors is not None:
+            low_bound, high_bound = misc.rej_bounds(self.rejection,self.errors)
+
+            opt, _ = curve_fit(model_function, self.x_values, low_bound, p0=p0, bounds=bound, maxfev=10000)
+            
+            low_fit = model_function(x_range, *opt)
+
+            opt, _ = curve_fit(model_function, self.x_values, high_bound, p0=p0, bounds=bound, maxfev=10000)
+
+            high_fit = model_function(x_range, *opt)
+
+        return x_range, fitted_curve, popt, low_fit, high_fit
 
 
-
-class PoreSizeDistribution:
+class PSD:
     @staticmethod
-    def calculate_psd(x, avg_r, std_dev):
+    def PDF(x, avg_r, std_dev):
         """
-        Calculates the pore size distribution using the log-normal distribution.
+        Calculates the pore size distribution using the log-normal probability density function.
         
         Parameters
         ----------
@@ -135,7 +235,7 @@ class PoreSizeDistribution:
         array-like
             Derivative of the sigmoid at each point in x.
         """
-        sigmoid_value = MWCOFitting.sigmoid(x, a, b, c)
+        sigmoid_value = curve_fitting.sigmoid(x, a, b, c)
         return a * sigmoid_value * (1 - sigmoid_value / c)
 
     @staticmethod
@@ -157,7 +257,7 @@ class PoreSizeDistribution:
         """
         numerator = (K - A) * (-B) * Q * np.exp(-B * x)
         denominator = nu * (C + Q * np.exp(-B * x))**(1 / nu + 1)
-        return numerator / denominator
+        return - numerator / denominator
 
     @staticmethod
     def derivative_gompertz(x, a, b, c):
@@ -202,10 +302,82 @@ class PoreSizeDistribution:
         return term1 + term2
     
 
-    
-class MolarVolumeRelation:
+class DistributionParameters:
     @staticmethod
-    def relation_vs_a(x):
+    def derivative_sigmoidal(r_range,psd_array):
+        """
+        Distribution parameters from the PSD curve calculated with the derivative of a sigmoidal function.
+
+        Parameters
+        ----------
+        r_range : array-like
+            Pore radius range for PSD curve.
+        psd_array : array-like
+            Values of the PSD curve calculated with the derivative of a sigmoidal function.
+
+        Returns
+        -------
+        r_avg : float
+            Mean pore radius. Pore radius value corresponding to the maximum point of the PSD curve.
+        SD : float
+            Standard deviation.
+        """
+        i_max = np.argmax(psd_array)
+        r_avg = round(r_range[i_max],4)
+        SD = round(np.std(r_range,mean=r_avg),4)
+
+        return r_avg, SD
+
+    @staticmethod
+    def PDF(x,rej_fit,low_fit,high_fit):
+        """
+        Distribution parameters calculated from rejection fitting curves with lower and upper bounds.
+        Radii are taken at 90% rejection from each curve and the average is taken. Standard deviation is then calculated amoung these values.
+
+        Parameters
+        ----------
+        x : array-like
+            x values range obtained in the curve fitting.
+        rej_fit : array-like
+            Fitted rejection values obtained in the curve fitting.
+        low_fit : array-like
+            Fitted rejection values in the low bound obtained in the curve fitting.
+        high_fit : array-like
+            Fitted rejection values in the high bound obtained in the curve fitting.
+
+        Returns
+        ----------
+        r_avg : float
+            Mean pore radius. Average radii from the three rejection curves.
+        SD : float
+            Standard deviation among the three radii.
+        r_lst : array-like
+            List of radii at 90% of the lower, normal, and higher rejection bounds. [low bound, normal bound, high bound]
+        """
+        r_l = misc.intp90(x,low_fit)
+        r = misc.intp90(x,rej_fit)
+        r_h = misc.intp90(x,high_fit)
+        r_lst = [r_l,r,r_h]
+        
+        dist = misc.rmvstr(r_lst)
+        
+        if not dist:
+            raise ValueError("Unable to calculate distribution parameters. No calculated values at 90% in either bound.")
+        
+        if len(dist) != 0:
+            r_avg = np.average(dist)
+            SD = np.std(dist)
+        else:
+            r_avg, SD = None, None
+
+        if SD == 0:
+            print("\nStandard deviation value is zero. Unable to calculate PDF. Divide by zero will be encountered. Proceed with caution.")
+
+        return r_avg, SD, r_lst
+    
+class MolarVolume:
+    @staticmethod
+    def relation_Schotte(x):
         """
         Estimate the molar volume of a molecule based on its molecular weight using a linear relation (method a).
         Method a: Schotte et al. group contribution theory
@@ -227,7 +399,7 @@ class MolarVolumeRelation:
         return 1.3348 * x - 10.552
 
     @staticmethod
-    def relation_vs_b(x):
+    def relation_Wu(x):
         """
         Estimate the molar volume of a molecule based on its molecular weight using a linear relation (method b).
         Method b: Wu et al. group contribution theory
@@ -260,8 +432,8 @@ class MolarVolumeRelation:
 
         Returns
         -------
-        VC : float
-            Estimated critical volume (in cubic meters per kilomole).
+        Vm : float
+            Estimated molar volume at the normal boiling point (in cubic entimeters per mole).
             The other returns are currently not implemented.
 
         Notes
@@ -280,13 +452,12 @@ class MolarVolumeRelation:
         - Boiling point (TB) [°C]
         - Critical temperature (TC) [°C]
         - Critical pressure (PC) [MPa]
-        - Critical volume (VC) [m³/kmol]
+        - Molar volume (Vm) [cm³/mol]
         - Heat of formation (Hform) [kcal/mol]
         - Gibbs free energy of formation (Gform) [kcal/mol]
         - Ideal gas heat capacity (CPIG) [cal/mol-K]
         4. Converts units where necessary:
         - Temperatures from Kelvin to Celsius
-        - Volume from cc/mol to m³/kmol
         - Energy values from kJ/mol to kcal/mol
         - Heat capacity from J/mol-K to cal/mol-K
         5. Issues warnings when missing parameter values prevent the calculation of certain properties for specific functional groups.
@@ -400,115 +571,118 @@ class MolarVolumeRelation:
         [0.0019,    0.0051,     38,     52.1,       79.93,      39.1,       27.76,      1.67E+01,       4.81E-03,       2.77E-05,       -2.11E-08,      1.557,      5.984,      'NA',       'NA']
         ]
 
-        # Number of functional groups
+        #Number of functional groups
         for i in range(0, 41):
             n[i] = len(molecule.GetSubstructMatches(SMARTS[i]))
 
-        # Calculations
-        # Number of atoms
+        #Calculations
+        #Number of atoms
         molecule_with_Hs = Chem.AddHs(molecule)
         na = molecule_with_Hs.GetNumAtoms()
 
-        # Molecular weight
+        #Molecular weight
         MW = Descriptors.MolWt(molecule)
 
-        # Boiling point
-        TB = 198.2
-        for i in range(0, 41):
-            if n[i] != 0:
-                if p[i][3] == 'NA':
-                    print('Warning: There is not available parameter in boiling point calculation (Group %0.0f,'%i, group[i], ')')
-                else:
-                    TB = TB + n[i] * p[i][3]
+        #Boiling point
+        # TB = 198.2
+        # for i in range(0, 41):
+        #     if n[i] != 0:
+        #         if p[i][3] == 'NA':
+        #             print('Warning: There is not available parameter in boiling point calculation (Group %0.0f,'%i, group[i], ')')
+        #         else:
+        #             TB = TB + n[i] * p[i][3]
 
-        # Critical temperature
-        TC1 = 0; TC2 = 0
-        for i in range(0, 41):
-            if n[i] != 0:
-                if p[i][0] == 'NA':
-                    print('Warning: There is not available parameter in critical temperature calculation (Group %0.0f,'%i, group[i], ')')
-                else:
-                    TC1 = TC1 + n[i] * p[i][0]
-                    TC2 = TC2 + n[i] * p[i][0]
-            TC = TB * (0.584 + 0.965 * TC1 - TC2**2)**-1
+        #Critical temperature
+        # TC1 = 0; TC2 = 0
+        # for i in range(0, 41):
+        #     if n[i] != 0:
+        #         if p[i][0] == 'NA':
+        #             print('Warning: There is not available parameter in critical temperature calculation (Group %0.0f,'%i, group[i], ')')
+        #         else:
+        #             TC1 = TC1 + n[i] * p[i][0]
+        #             TC2 = TC2 + n[i] * p[i][0]
+        #     TC = TB * (0.584 + 0.965 * TC1 - TC2**2)**-1
 
-        # Critical pressure
-        PC1 = 0
-        for i in range(0, 41):
-            if n[i] != 0:
-                if p[i][1] == 'NA':
-                    print('Warning: There is not available parameter in critical pressure calculation (Group %0.0f,'%i, group[i], ')')
-                else:
-                    PC1 = PC1 + n[i] * p[i][1]
-            PC = (0.113 + 0.0032 * na - PC1)**-2
+        #Critical pressure
+        # PC1 = 0
+        # for i in range(0, 41):
+        #     if n[i] != 0:
+        #         if p[i][1] == 'NA':
+        #             print('Warning: There is not available parameter in critical pressure calculation (Group %0.0f,'%i, group[i], ')')
+        #         else:
+        #             PC1 = PC1 + n[i] * p[i][1]
+        #     PC = (0.113 + 0.0032 * na - PC1)**-2
         
-        # Critical volume
+        #Critical volume
         VC = 17.5
         for i in range(0, 41):
             if n[i] != 0:
                 if p[i][2] == 'NA':
-                    print('Warning: There is not available parameter in critical volume calculation (Group %0.0f,'%i, group[i], ')')
+                    print('\nWarning: There is not available parameter in critical volume calculation (Group %0.0f,'%i, group[i], ')')
+                    print('\nRemark: Contribution from group %0.0f,'%i, group[i], 'will be discarded from calculations. Molar volume value will be affected.')
                 else:
                     VC = VC + n[i] * p[i][2]
 
-        # Heat of formation (ideal gas, 298 K)
-        Hform = 68.29
-        for i in range(0, 41):
-            if n[i] != 0:
-                if p[i][5] == 'NA':
-                    print('Warning: There is not available parameter in heat of formation calculation (Group %0.0f,'%i, group[i], ')')
-                else:
-                    Hform = Hform + n[i] * p[i][5]
+        #Heat of formation (ideal gas, 298 K)
+        # Hform = 68.29
+        # for i in range(0, 41):
+        #     if n[i] != 0:
+        #         if p[i][5] == 'NA':
+        #             print('Warning: There is not available parameter in heat of formation calculation (Group %0.0f,'%i, group[i], ')')
+        #         else:
+        #             Hform = Hform + n[i] * p[i][5]
 
-        # Gibbs energy of formation (ideal gas, 298 K)
-        Gform = 53.88
-        for i in range(0, 41):
-            if n[i] != 0:
-                if p[i][6] == 'NA':
-                    print('Warning: There is not available parameter in Gibbs energy of formation calculation (Group %0.0f,'%i, group[i], ')')
-                else:
-                    Gform = Gform + n[i] * p[i][6]
+        #Gibbs energy of formation (ideal gas, 298 K)
+        # Gform = 53.88
+        # for i in range(0, 41):
+        #     if n[i] != 0:
+        #         if p[i][6] == 'NA':
+        #             print('Warning: There is not available parameter in Gibbs energy of formation calculation (Group %0.0f,'%i, group[i], ')')
+        #         else:
+        #             Gform = Gform + n[i] * p[i][6]
 
-        # Ideal gas heat capacity
-        a = 0; b = 0; c = 0; d = 0
-        for i in range(0, 41):
-            if n[i] != 0:
-                if p[i][7] == 'NA':
-                    print('Warning: There is not available parameter in ideal gas heat capacity calculation (Group %0.0f,'%i, group[i], ')')
-                else:
-                    a = a + n[i] * p[i][7]
-                    b = b + n[i] * p[i][8]
-                    c = c + n[i] * p[i][9]
-                    d = d + n[i] * p[i][10]
+        #Ideal gas heat capacity
+        # a = 0; b = 0; c = 0; d = 0
+        # for i in range(0, 41):
+        #     if n[i] != 0:
+        #         if p[i][7] == 'NA':
+        #             print('Warning: There is not available parameter in ideal gas heat capacity calculation (Group %0.0f,'%i, group[i], ')')
+        #         else:
+        #             a = a + n[i] * p[i][7]
+        #             b = b + n[i] * p[i][8]
+        #             c = c + n[i] * p[i][9]
+        #             d = d + n[i] * p[i][10]
                     
                     
         
         
-        # Unit conversion
-        TB = TB - 273.15        # K to C
-        TC = TC - 273.15        # K to C
-        VC = VC / 1000          # cc/mol to cum/kmol
-        Hform = Hform / 4.1868   # kJ/mol to kcal/mol
-        Gform = Gform / 4.1868   # kJ/mol to kcal/mol
+        #Unit conversion
+        # TB = TB - 273.15        # K to C
+        # TC = TC - 273.15        # K to C
+        # Hform = Hform / 4.1868   # kJ/mol to kcal/mol
+        # Gform = Gform / 4.1868   # kJ/mol to kcal/mol
 
-        # CPIG parameter estimation (
-        c1 = (a - 37.93) / 4.1868          # J/mol-K to cal/mol-K
-        c2 = (b + 0.21) / 4.1868           # J/mol-K to cal/mol-K
-        c3 = (c - 0.000391) / 4.1868       # J/mol-K to cal/mol-K
-        c4 = (d + 0.000000206) / 4.1868    # J/mol-K to cal/mol-K
+        #CPIG parameter estimation (
+        # c1 = (a - 37.93) / 4.1868          # J/mol-K to cal/mol-K
+        # c2 = (b + 0.21) / 4.1868           # J/mol-K to cal/mol-K
+        # c3 = (c - 0.000391) / 4.1868       # J/mol-K to cal/mol-K
+        # c4 = (d + 0.000000206) / 4.1868    # J/mol-K to cal/mol-K
 
-        C1 = c1 + 273.15 * c2 + 273.15**2 * c3 + 273.15**3 * c4
-        C2 = c2 + 2 * 273.15 * c3 + 3 * 273.15**2 * c4
-        C3 = c3 + 3 * 273.15 * c4
-        C4 = c4
-        C5 = 0
-        C6 = 0
-        C7 = 6.85
-        C8 = 826.85
-        C9 = 8.60543
-        C10 = ((C1 + C2 * C7 + C3 * C7**2 + C4 * C7**3) - C9) / 280**1.5
-        C11 = 1.5
+        # C1 = c1 + 273.15 * c2 + 273.15**2 * c3 + 273.15**3 * c4
+        # C2 = c2 + 2 * 273.15 * c3 + 3 * 273.15**2 * c4
+        # C3 = c3 + 3 * 273.15 * c4
+        # C4 = c4
+        # C5 = 0
+        # C6 = 0
+        # C7 = 6.85
+        # C8 = 826.85
+        # C9 = 8.60543
+        # C10 = ((C1 + C2 * C7 + C3 * C7**2 + C4 * C7**3) - C9) / 280**1.5
+        # C11 = 1.5
 
-        CPIG = [C1, C2, C3, C4, C5, C6, C7, C8, C9, C10, C11]
+        # CPIG = [C1, C2, C3, C4, C5, C6, C7, C8, C9, C10, C11]
 
-        return VC #[MW, TB, TC, PC, VC, Hform, Gform, CPIG]
+        #Empirical formula to calculate Molar Volume at normal boiling point [cm3 gmol-1]
+        Vm = 0.285 * (VC)**1.048
+
+        return Vm #[MW, TB, TC, PC, VC, Hform, Gform, CPIG]

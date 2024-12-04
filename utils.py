@@ -12,7 +12,7 @@ class StokesRadiusCalculator:
         eta (float): Dynamic viscosity of the fluid (cP)
 
         Returns:
-        float: Radius of the particle (m)
+        float: Radius of the particle (nm)
         """
         # Boltzmann constant in J/K
         k_B = 1.380649e-23
@@ -24,7 +24,8 @@ class StokesRadiusCalculator:
         
         # Calculate the radius
         r = k_B * T / (6 * np.pi * eta * D)
-        
+        r = r/(1e-9) # Convert radius from m to nm
+
         return r
 
 
