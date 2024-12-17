@@ -1,7 +1,7 @@
 import numpy as np
 import matplotlib.pyplot as plt
 
-from fitting_models import curve_fitting, PSD, MolarVolume, DistributionParameters
+from fitting_models import Curve, PSD, MolarVolume, DistributionParameters
 from utils import StokesRadiusCalculator, DiffusivityCalculator, Solvent
 
 def main():
@@ -9,7 +9,7 @@ def main():
     rejections = np.array([0.1, 0.3, 0.5, 0.7, 0.9, 0.95])
     errors = np.zeros_like(rejections)
 
-    mwco_fitting = curve_fitting(molecular_weights, rejections, errors)
+    mwco_fitting = Curve(molecular_weights, rejections, errors)
     mw_range, fitted_curve, _, _, _ = mwco_fitting.fit_curve('boltzmann')
 
     print("MWCO Curve Fit:")

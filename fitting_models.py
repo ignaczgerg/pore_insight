@@ -94,7 +94,7 @@ class misc:
         return new_lst
 
 
-class curve_fitting:
+class Curve:
     def __init__(self, x_values, rejection,errors=None):
         self.x_values = x_values
         self.rejection = rejection
