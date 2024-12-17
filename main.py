@@ -1,5 +1,4 @@
 import numpy as np
-import matplotlib.pyplot as plt
 
 from fitting_models import Curve, PSD, MolarVolume, DistributionParameters
 from utils import StokesRadiusCalculator, DiffusivityCalculator, Solvent

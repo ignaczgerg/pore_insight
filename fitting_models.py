@@ -235,7 +235,7 @@ class PSD:
         array-like
             Derivative of the sigmoid at each point in x.
         """
-        sigmoid_value = curve_fitting.sigmoid(x, a, b, c)
+        sigmoid_value = Curve.sigmoid(x, a, b, c)
         return a * sigmoid_value * (1 - sigmoid_value / c)
 
     @staticmethod
