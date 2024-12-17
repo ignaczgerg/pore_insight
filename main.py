@@ -19,7 +19,7 @@ def main():
     x = np.linspace(1, 100, 100)  # Random pore sizes
     avg_radius = 50.0
     std_dev = 10.0
-    psd = PSD.PDF(x, avg_radius, std_dev)
+    psd = PSD.log_normal(x, avg_radius, std_dev)
 
     print("\nPore Size Distribution:")
     print("Pore sizes:", x)

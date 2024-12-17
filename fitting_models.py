@@ -192,7 +192,7 @@ class curve_fitting:
 
 class PSD:
     @staticmethod
-    def PDF(x, avg_r, std_dev):
+    def log_normal(x, avg_r, std_dev):
         """
         Calculates the pore size distribution using the log-normal probability density function.
         
