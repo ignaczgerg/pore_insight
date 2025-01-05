@@ -1,8 +1,8 @@
 import numpy as np
 import matplotlib.pyplot as plt
 
-from fitting_models import curve_fitting, PSD, MolarVolume, DistributionParameters
-from utils import StokesRadiusCalculator, DiffusivityCalculator, Solvent
+from models import curve_fitting, PSD, MolarVolume, DistributionParameters
+from _utils import StokesRadiusCalculator, DiffusivityCalculator, Solvent
 
 def main():
     # Rifan (2024), Table S2, M4. MetOH 25C 0.543 cP

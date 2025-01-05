@@ -1,105 +1,11 @@
+from dataclasses import dataclass
+from typing import Dict
 import numpy as np
-from scipy.optimize import curve_fit
-import rdkit
 from rdkit import Chem
 from rdkit.Chem import Descriptors
+from utils import intp90, rmvstr, rej_bounds, read_molecules
 
-class misc:
-    @staticmethod
-    def rej_bounds(rejection,error):
-        """
-        Estimates the lower and higher bounds based on rejection errors. Array-like objects should be of the same size.
-
-        Parameters
-        ----------
-        rejection : array-like
-            Experimental rejection points.
-        error : array-like
-            Experimental rejection error points (+/-).
-
-        Returns
-        -------
-        rej_low : array-like
-            Rejection points in the low bound of error (+).
-        rej_high : array-like
-            Rejection points in the high bound of error (-).
-        """
-
-        rej_low = []
-        rej_high = []
-        for i in range(0,len(rejection)):
-            l = rejection[i] + error[i]
-            h = rejection[i] - error[i]
-            rej_low.append(l)
-            rej_high.append(h)
-
-        return rej_low, rej_high
-    
-    @staticmethod
-    def intp90(r_values,rej_lst):
-        """
-        Estimates the radius or molecular weight (x value) value at 90% rejection (y value).
-
-        Parameters
-        ----------
-        rej_lst : array-like
-            List of fitted rejections.
-        x : array-like
-            Radius range obtained from the curve fitting.
-
-        Returns
-        ----------
-        x_90 : float or str
-            Radius or molecular weight float value at 90% rejection.
-            If the curve does not reach 90%, str value "N/A" will be returned and discarded from calculations.
-        """
-
-        if rej_lst[-1] > 90:
-            for i in range(0,len(rej_lst)):
-                if rej_lst[i] > 90:
-                    y1 = rej_lst[i-1]
-                    y2 = rej_lst[i]
-                    x1 = r_values[i-1]
-                    x2 = r_values[i]
-                    
-                    x_90 = x1 + ((90-y1)/(y2-y1))*(x2-x1)
-                    break
-        elif rej_lst[-1] == 90:
-            x_90 = rej_lst[-1]
-        else:
-            x_90 = str("N/A")
-        
-        return x_90
-    
-    @staticmethod
-    def rmvstr(lst):
-        """
-        Removes any str value from a list.
-
-        Parameters
-        ----------
-        lst : array-like
-            List of values
-
-        Returns
-        ----------
-        lst : array-lie
-            Same list without str value(s)
-        """
-        new_lst = []
-        for i in lst:
-            if type(i) != str:
-                new_lst.append(i)
-
-        return new_lst
-
-
-class Curve:
-    def __init__(self, x_values, rejection,errors=None):
-        self.x_values = x_values
-        self.rejection = rejection
-        self.errors = errors
-      
+class CurveModels:
     @staticmethod
     def boltzmann(x, a, b, c, d):
         return b + (a - b) / (1 + np.exp((x - c) / d))
@@ -120,77 +26,7 @@ class Curve:
     def double_sigmoid(x, K1, B1, M1, K2, B2, M2):
         return (K1 / (1 + np.exp(-B1 * (x - M1)))) + (K2 / (1 + np.exp(-B2 * (x - M2))))
 
-    def fit_curve(self, model_name='boltzmann'):
-        """
-        Fit the curve using the specified model function.
-
-        Parameters
-        ----------
-        model_name : str, optional
-            The name of the model function to use for fitting. Options are: 
-            'boltzmann', 'sigmoid', 'generalized_logistic', 'gompertz', 'double_sigmoid'.
-            Default is 'boltzmann'.
-
-        Returns
-        -------
-        x_range : array-like
-            x values range for plotting.
-        fitted_curve : array-like
-            Fitted curve values.
-        """
-        model_functions = {
-            'boltzmann': self.boltzmann,
-            'sigmoid': self.sigmoid,
-            'generalized_logistic': self.generalized_logistic,
-            'gompertz': self.gompertz,
-            'double_sigmoid': self.double_sigmoid
-        }
-
-        if model_name not in model_functions:
-            raise ValueError(f"Model '{model_name}' is not recognized. Choose from: {list(model_functions.keys())}")
-
-        model_function = model_functions[model_name]
-
-        initial_params = {
-            'boltzmann': [-10, 1, np.median(self.x_values), 1],  
-            'sigmoid': [0.1, np.median(self.x_values), 1],
-            'generalized_logistic': [1, 1, 1, 1, 1, 1],
-            'gompertz': [1, 1, 1],
-            'double_sigmoid': [1, 1, np.median(self.x_values), 1, 1, np.median(self.x_values)]
-        }
-
-        bounds = {
-            'boltzmann': ([-np.inf, 0, 0, 0], [np.inf, np.inf, np.inf, np.inf]),
-            'sigmoid': ([0, 0, 0], [np.inf, np.inf, np.inf]),
-            'generalized_logistic': ([0, 0, 0, 0, 0, 0], [np.inf, np.inf, np.inf, np.inf, np.inf, np.inf]),
-            'gompertz': ([0, 0, 0], [np.inf, np.inf, np.inf]),
-            'double_sigmoid': ([0, 0, 0, 0, 0, 0], [np.inf, np.inf, np.inf, np.inf, np.inf, np.inf])
-        }
-
-        p0 = initial_params[model_name]
-        bound = bounds[model_name]
-
-        x_range = np.linspace(0,max(self.x_values)*2,100)
-        popt, _ = curve_fit(model_function, self.x_values, self.rejection, p0=p0, bounds=bound, maxfev=10000)  
-        
-        fitted_curve = model_function(x_range, *popt)
-
-        low_fit, high_fit = None, None
-        if self.errors is not None:
-            low_bound, high_bound = misc.rej_bounds(self.rejection,self.errors)
-
-            opt, _ = curve_fit(model_function, self.x_values, low_bound, p0=p0, bounds=bound, maxfev=10000)
-            
-            low_fit = model_function(x_range, *opt)
-
-            opt, _ = curve_fit(model_function, self.x_values, high_bound, p0=p0, bounds=bound, maxfev=10000)
-
-            high_fit = model_function(x_range, *opt)
-
-        return x_range, fitted_curve, popt, low_fit, high_fit
-
-
-class PSD:
+class PSDModels:
     @staticmethod
     def log_normal(x, avg_r, std_dev):
         """
@@ -235,7 +71,7 @@ class PSD:
         array-like
             Derivative of the sigmoid at each point in x.
         """
-        sigmoid_value = Curve.sigmoid(x, a, b, c)
+        sigmoid_value = CurveModels.sigmoid(x, a, b, c)
         return a * sigmoid_value * (1 - sigmoid_value / c)
 
     @staticmethod
@@ -302,7 +138,7 @@ class PSD:
         return term1 + term2
     
 
-class DistributionParameters:
+class DistributionModels:
     @staticmethod
     def derivative_sigmoidal(r_range,psd_array):
         """
@@ -326,7 +162,7 @@ class DistributionParameters:
         r_avg = round(r_range[i_max],4)
         SD = round(np.std(r_range,mean=r_avg),4)
 
-        return r_avg, SD
+        return {'average_radius':r_avg, 'standard_deviation':SD}
 
     @staticmethod
     def PDF(x,rej_fit,low_fit,high_fit):
@@ -354,12 +190,12 @@ class DistributionParameters:
         r_lst : array-like
             List of radii at 90% of the lower, normal, and higher rejection bounds. [low bound, normal bound, high bound]
         """
-        r_l = misc.intp90(x,low_fit)
-        r = misc.intp90(x,rej_fit)
-        r_h = misc.intp90(x,high_fit)
+        r_l = intp90(x,low_fit)
+        r = intp90(x,rej_fit)
+        r_h = intp90(x,high_fit)
         r_lst = [r_l,r,r_h]
         
-        dist = misc.rmvstr(r_lst)
+        dist = rmvstr(r_lst)
         
         if not dist:
             raise ValueError("Unable to calculate distribution parameters. No calculated values at 90% in either bound.")
@@ -373,19 +209,18 @@ class DistributionParameters:
         if SD == 0:
             print("\nStandard deviation value is zero. Unable to calculate PDF. Divide by zero will be encountered. Proceed with caution.")
 
-        return r_avg, SD, r_lst
+        return {'average_radius':r_avg, 'standard_deviation':SD, 'radius_list':r_lst}
     
 class MolarVolume:
     @staticmethod
-    def relation_Schotte(x):
+    def relation_Schotte(mol):
         """
         Estimate the molar volume of a molecule based on its molecular weight using a linear relation (method a).
         Method a: Schotte et al. group contribution theory
 
         Parameters
         ----------
-        x : float
-            Molecular weight of the molecule for which the molar volume will be estimated.
+        mol: rdkit Chem.Mol object for a single molecule.
 
         Returns
         -------
@@ -396,10 +231,14 @@ class MolarVolume:
         - William Schotte, Prediction of the molar volume at the normal boiling point, The Chemical Engineering Journal, Volume 48, Issue 3, 1992, Pages 167-172, ISSN 0300-9467
         - https://doi.org/10.1016/0300-9467(92)80032-6
         """
+        try:
+            x = Descriptors.MolWt(mol)
+        except:
+            raise ValueError("RDKit Mol object not found. Please provide a valid RDKit Mol object.")
         return 1.3348 * x - 10.552
 
     @staticmethod
-    def relation_Wu(x):
+    def relation_Wu(mol):
         """
         Estimate the molar volume of a molecule based on its molecular weight using a linear relation (method b).
         Method b: Wu et al. group contribution theory
@@ -418,10 +257,14 @@ class MolarVolume:
         - Albert X. Wu, Sharon Lin, Katherine Mizrahi Rodriguez, Francesco M. Benedetti, Taigyu Joo, Aristotle F. Grosz, Kayla R. Storme, Naksha Roy, Duha Syar, Zachary P. Smith, Revisiting group contribution theory for estimating fractional free volume of microporous polymer membranes, Journal of Membrane Science, Volume 636, 2021, 119526, ISSN 0376-7388
         - https://doi.org/10.1016/j.memsci.2021.119526
         """
+        try:
+            x = Descriptors.MolWt(mol)
+        except:
+            raise ValueError("RDKit Mol object not found. Please provide a valid RDKit Mol object.")
         return 1.1353*x + 3.8219
 
     @staticmethod
-    def joback(SMILES):
+    def joback(mol: Chem.Mol):
         """
         Estimate thermodynamic properties of a molecule using the Joback method based on its SMILES notation.
 
@@ -476,7 +319,7 @@ class MolarVolume:
         0.1065  # Estimated critical volume for ethanol
         
         """
-        molecule = Chem.MolFromSmiles(SMILES)
+        molecule = mol
         # Blank
         group = [0 for i in range(41)]
         SMARTS = [0 for i in range(41)]
@@ -686,3 +529,66 @@ class MolarVolume:
         Vm = 0.285 * (VC)**1.048
 
         return Vm #[MW, TB, TC, PC, VC, Hform, Gform, CPIG]
+    
+
+
+
+class StokesRadiusCalculator:
+    @staticmethod
+    def stokes_einstein_radius(D,T,eta):
+        """
+        Calculate the radius of a particle from the diffusion coefficient using the Stokes-Einstein equation.
+
+        Parameters:
+        D (float): Diffusion coefficient (cm²/s)
+        T (float): Absolute temperature (K)
+        eta (float): Dynamic viscosity of the fluid (cP)
+
+        Returns:
+        float: Radius of the particle (nm)
+        """
+        # Boltzmann constant in J/K
+        k_B = 1.380649e-23
+        # Convert dynamic viscosity from cP to kg/(m·s) (or Pa·s)
+        eta = eta*0.001
+        
+        # Convert diffusion coefficient from cm²/s to m²/s
+        D = D * 1e-4
+        
+        # Calculate the radius
+        r = k_B * T / (6 * np.pi * eta * D)
+        r = r/(1e-9) # Convert radius from m to nm
+
+        return r
+
+
+class DiffusivityCalculator:
+    @staticmethod
+    def wilke_chang_diffusion_coefficient(molar_volume, molecular_weight, temp, viscosity, alpha):
+        d = (7.4E-8) * temp * np.sqrt(alpha * molecular_weight) / (viscosity * (alpha * molar_volume)**0.6)
+        d = float(d) # The value was being printed like: [np.float64(5.497635472812708e-06), np.float64(4.708457138648548e-06), np.float64(4.194534214640366e-06), np.float64(3.7831496747983576e-06)]
+        return d
+
+
+
+@dataclass
+class Solvent:
+    name: str
+    molecular_weight: float
+    viscosity: float
+    alpha: float
+
+
+class Solvents:
+    _solvents: Dict[str, Solvent] = {
+        "water": Solvent(name="water", molecular_weight=18.01528, viscosity=0.001, alpha=2.6),
+        "methanol": Solvent(name="methanol", molecular_weight=32.042, viscosity=0.0006, alpha=1.9),
+        "ethanol": Solvent(name="ethanol", molecular_weight=46.069, viscosity=0.0012, alpha=1.5),
+        "other": Solvent(name="other", molecular_weight=None, viscosity=None, alpha=1.0),
+    }
+
+    @classmethod
+    def get(cls, name: str) -> Solvent:
+        if name not in cls._solvents:
+            raise ValueError(f"Solvent '{name}' is not defined.")
+        return cls._solvents[name]

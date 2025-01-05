@@ -1,5 +1,5 @@
 import unittest
-from fitting_models import MolarVolume
+from models import MolarVolume
 
 class TestMolarVolumeRelation(unittest.TestCase):
     def test_relation_vs_a(self):

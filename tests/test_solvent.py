@@ -1,5 +1,5 @@
 import unittest
-from utils import Solvent
+from _utils import Solvent
 
 class TestSolvent(unittest.TestCase):
     def test_from_selection_water(self):

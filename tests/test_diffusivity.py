@@ -1,5 +1,5 @@
 import unittest
-from utils import DiffusivityCalculator
+from _utils import DiffusivityCalculator
 
 class TestDiffusivityCalculator(unittest.TestCase):
     def test_bulk_diffusivity(self):

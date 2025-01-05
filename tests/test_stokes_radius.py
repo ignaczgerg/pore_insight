@@ -1,5 +1,5 @@
 import unittest
-from utils import StokesRadiusCalculator
+from _utils import StokesRadiusCalculator
 
 class TestStokesRadiusCalculator(unittest.TestCase):
     def test_stokes_radius(self):

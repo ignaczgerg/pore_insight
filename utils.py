@@ -1,60 +1,111 @@
 import numpy as np
-
-class StokesRadiusCalculator:
-    @staticmethod
-    def stokes_einstein_radius(D,T,eta):
-        """
-        Calculate the radius of a particle from the diffusion coefficient using the Stokes-Einstein equation.
-
-        Parameters:
-        D (float): Diffusion coefficient (cm²/s)
-        T (float): Absolute temperature (K)
-        eta (float): Dynamic viscosity of the fluid (cP)
-
-        Returns:
-        float: Radius of the particle (nm)
-        """
-        # Boltzmann constant in J/K
-        k_B = 1.380649e-23
-        # Convert dynamic viscosity from cP to kg/(m·s) (or Pa·s)
-        eta = eta*0.001
-        
-        # Convert diffusion coefficient from cm²/s to m²/s
-        D = D * 1e-4
-        
-        # Calculate the radius
-        r = k_B * T / (6 * np.pi * eta * D)
-        r = r/(1e-9) # Convert radius from m to nm
-
-        return r
-
-
-class DiffusivityCalculator:
-    @staticmethod
-    def wilke_chang_diffusion_coefficient(molar_volume, molecular_weight, temp, viscosity, alpha):
-        d = (7.4E-8) * temp * np.sqrt(alpha * molecular_weight) / (viscosity * (alpha * molar_volume)**0.6)
-        d = float(d) # The value was being printed like: [np.float64(5.497635472812708e-06), np.float64(4.708457138648548e-06), np.float64(4.194534214640366e-06), np.float64(3.7831496747983576e-06)]
-        return d
+from rdkit import Chem
+from typing import List, Union
 
 
 
-class Solvent:
-    def __init__(self, sol_type, temperature, molecular_weight, viscosity, alpha):
-        self.sol_type = sol_type
-        self.temperature = temperature
-        self.molecular_weight = molecular_weight
-        self.viscosity = viscosity
-        self.alpha = alpha
+    
 
-    @staticmethod
-    def from_selection(selection, temperature, viscosity):
-        if selection == 1:
-            return Solvent("Water", temperature, 18.01528, viscosity, 2.6)
-        elif selection == 2:
-            return Solvent("Methanol", temperature, 32.042, viscosity, 1.9)
-        elif selection == 3:
-            return Solvent("Ethanol", temperature, 46.069, viscosity, 1.5)
-        elif selection == 4:
-            return Solvent("Other", temperature, None, viscosity, 1.0)
-        else:
-            raise ValueError("Invalid solvent selection")
+def rej_bounds(rejection,error):
+    """
+    Estimates the lower and higher bounds based on rejection errors. Array-like objects should be of the same size.
+
+    Parameters
+    ----------
+    rejection : array-like
+        Experimental rejection points.
+    error : array-like
+        Experimental rejection error points (+/-).
+
+    Returns
+    -------
+    rej_low : array-like
+        Rejection points in the low bound of error (+).
+    rej_high : array-like
+        Rejection points in the high bound of error (-).
+    """
+
+    rej_low = []
+    rej_high = []
+    for i in range(0,len(rejection)):
+        l = rejection[i] + error[i]
+        h = rejection[i] - error[i]
+        rej_low.append(l)
+        rej_high.append(h)
+
+    return rej_low, rej_high
+
+def intp90(r_values,rej_lst):
+    """
+    Estimates the radius or molecular weight (x value) value at 90% rejection (y value).
+
+    Parameters
+    ----------
+    rej_lst : array-like
+        List of fitted rejections.
+    x : array-like
+        Radius range obtained from the curve fitting.
+
+    Returns
+    ----------
+    x_90 : float or str
+        Radius or molecular weight float value at 90% rejection.
+        If the curve does not reach 90%, str value "N/A" will be returned and discarded from calculations.
+    """
+
+    if rej_lst[-1] > 90:
+        for i in range(0,len(rej_lst)):
+            if rej_lst[i] > 90:
+                y1 = rej_lst[i-1]
+                y2 = rej_lst[i]
+                x1 = r_values[i-1]
+                x2 = r_values[i]
+                
+                x_90 = x1 + ((90-y1)/(y2-y1))*(x2-x1)
+                break
+    elif rej_lst[-1] == 90:
+        x_90 = rej_lst[-1]
+    else:
+        x_90 = str("N/A")
+    
+    return x_90
+
+def rmvstr(lst):
+    """
+    Removes any str value from a list.
+
+    Parameters
+    ----------
+    lst : array-like
+        List of values
+
+    Returns
+    ----------
+    lst : array-lie
+        Same list without str value(s)
+    """
+    new_lst = []
+    for i in lst:
+        if type(i) != str:
+            new_lst.append(i)
+
+    return new_lst
+
+
+def read_molecules(molecule_strings: List[str]) -> List[Union[Chem.Mol, None]]:
+    mols = []
+    for mol_str in molecule_strings:
+        try:
+            if mol_str.startswith("InChI="):
+                mol = Chem.MolFromInchi(mol_str)
+                if mol is None:
+                    raise ValueError(f"Invalid InChI key: {mol_str}")
+            else:
+                mol = Chem.MolFromSmiles(mol_str)
+                if mol is None:
+                    raise ValueError(f"Invalid SMILES string: {mol_str}")
+            mols.append(mol)
+        except Exception as e:
+            print(f"Error processing molecule string {mol_str}: {e}")
+            mols.append(None)
+    return mols

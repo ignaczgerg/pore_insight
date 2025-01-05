@@ -1,6 +1,6 @@
 import unittest
 import numpy as np
-from fitting_models import curve_fitting
+from models import curve_fitting
 
 class TestMWCOFitting(unittest.TestCase):
     def test_fit_curve(self):

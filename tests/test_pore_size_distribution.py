@@ -1,6 +1,6 @@
 import unittest
 import numpy as np
-from fitting_models import PSD
+from models import PSD
 
 class TestPoreSizeDistribution(unittest.TestCase):
     def test_psd(self):
