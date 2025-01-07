@@ -1,4 +1,4 @@
-# Pore Insight
+# PoreInsight
 
 ## Table of Contents
 - Overview
