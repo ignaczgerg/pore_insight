@@ -1,14 +1,14 @@
 from setuptools import setup, find_packages
 
 setup(
-    name="PoreInsight",  
+    name="pore_insight",  
     version="0.1.0",  
     description="A Python package for pore size distribution analysis",
     long_description=open("README.md").read(),  
     long_description_content_type="text/markdown",
     author="Gergo Ignacz",
     author_email="gergo.ignacz@kaust.edu.sa",
-    url="https://github.com/ignaczgerg/PoreInsight",  
+    url="https://github.com/ignaczgerg/pore_insight",  
     license="MIT",  
     packages=find_packages(),  
     install_requires=[
