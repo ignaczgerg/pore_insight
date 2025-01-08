@@ -32,8 +32,8 @@ PoreInsight is a Python-based application designed to analyze and model pore siz
 
 ### Clone Repository
 ```bash
-git clone git@github.com:ignaczgerg/PoreInsight.git
-cd PoreInsight
+git clone git@github.com:ignaczgerg/pore_insight.git
+cd pore_insight
 ```
 ### Install Dependencies
 ```bash
