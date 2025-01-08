@@ -4,9 +4,9 @@ import pytest
 import numpy as np
 from unittest.mock import patch
 from rdkit import Chem
-from models import PSDModels, Solvents
-from pore_size_distribution import PSD
-from utils import read_molecules
+from pore_insight.models import PSDModels, Solvents
+from pore_insight.pore_size_distribution import PSD
+from pore_insight.utils import read_molecules
 
 def test_psd_initialization_with_arrays():
     rejection_values = np.array([90, 95, 99])

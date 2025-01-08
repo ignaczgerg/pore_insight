@@ -3,6 +3,7 @@
 import pytest
 import numpy as np
 from rdkit import Chem
+from rdkit.Chem import Descriptors
 from models import (
     CurveModels,
     PSDModels,
@@ -69,7 +70,7 @@ def test_psd_models_derivative_generalized_logistic():
     x = np.linspace(0, 10, 100)
     A, K, B, Q, C, nu = 0, 1, 1, 1, 1, 1
     derivative = PSDModels.derivative_generalized_logistic(x, A, K, B, Q, C, nu)
-    expected = - (K - A) * B * Q * np.exp(-B * x) / (nu * (C + Q * np.exp(-B * x))**(1 / nu + 1))
+    expected = (K - A) * B * Q * np.exp(-B * x) / (nu * (C + Q * np.exp(-B * x))**(1 / nu + 1))
     assert np.allclose(derivative, expected)
 
 def test_psd_models_derivative_gompertz():
@@ -91,9 +92,16 @@ def test_psd_models_derivative_double_sigmoid():
 def test_distribution_models_derivative_sigmoidal():
     r_range = np.linspace(1, 10, 100)
     psd_array = PSDModels.derivative_sigmoid(r_range, a=1, b=5, c=10)
-    assert len(psd_array) == len(r_range)
-    assert psd_array['average_radius'] is not None
-    assert psd_array['standard_deviation'] is not None
+    
+    # Call the correct function to get distribution parameters
+    distribution = DistributionModels.derivative_sigmoidal(r_range, psd_array)
+    
+    # Assertions
+    assert isinstance(distribution, dict), "Output should be a dictionary"
+    assert 'average_radius' in distribution, "Key 'average_radius' missing in distribution"
+    assert 'standard_deviation' in distribution, "Key 'standard_deviation' missing in distribution"
+    assert distribution['average_radius'] is not None, "'average_radius' should not be None"
+    assert distribution['standard_deviation'] is not None, "'standard_deviation' should not be None"
 
 def test_distribution_models_PDF():
     x = np.linspace(1, 10, 100)
@@ -149,8 +157,9 @@ def test_diffusivity_calculator():
     diffusivity = DiffusivityCalculator.wilke_chang_diffusion_coefficient(
         molar_volume, molecular_weight, temp, viscosity, alpha
     )
-    assert isinstance(diffusivity, float) or isinstance(diffusivity, np.float64)
-    assert diffusivity > 0
+    assert isinstance(diffusivity, np.ndarray), "Diffusivity should be a NumPy array"
+    assert diffusivity.shape == molar_volume.shape, "Diffusivity array shape mismatch"
+    assert np.all(diffusivity > 0), "All diffusivity values should be positive"
 
 def test_solvents_get():
     water = Solvents.get("water")

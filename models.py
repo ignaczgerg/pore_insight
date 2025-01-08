@@ -586,7 +586,7 @@ class DiffusivityCalculator:
     @staticmethod
     def wilke_chang_diffusion_coefficient(molar_volume, molecular_weight, temp, viscosity, alpha):
         d = (7.4E-8) * temp * np.sqrt(alpha * molecular_weight) / (viscosity * (alpha * molar_volume)**0.6)
-        d = float(d) # The value was being printed like: [np.float64(5.497635472812708e-06), np.float64(4.708457138648548e-06), np.float64(4.194534214640366e-06), np.float64(3.7831496747983576e-06)]
+        # d = float(d) # The value was being printed like: [np.float64(5.497635472812708e-06), np.float64(4.708457138648548e-06), np.float64(4.194534214640366e-06), np.float64(3.7831496747983576e-06)]
         return d
 
 
