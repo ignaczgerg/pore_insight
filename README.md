@@ -24,7 +24,7 @@ PoreInsight is a Python-based application designed to analyze and model pore siz
 
 ## Installation
 ### Prerequisites
-- Python 3.8 or higher
+- Python 3.13
 - RDKit
 - NumPy
 - SciPy
