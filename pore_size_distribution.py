@@ -5,9 +5,9 @@ import rdkit
 from rdkit import Chem
 from rdkit.Chem import Descriptors
 
-from utils import rej_bounds, intp90, rmvstr, read_molecules
-from models import CurveModels, DiffusivityCalculator, PSDModels, DistributionModels, MolarVolume, StokesRadiusCalculator
-from models import Solvents
+from pore_insight.utils import rej_bounds, intp90, rmvstr, read_molecules
+from pore_insight.models import CurveModels, DiffusivityCalculator, PSDModels, DistributionModels, MolarVolume, StokesRadiusCalculator
+from pore_insight.models import Solvents
 
 
 class PSDInputHandler:
@@ -191,34 +191,36 @@ class PSD:
         Parameters
         ----------
         model_name : str, optional
-           
+            The name of the model function to use for fitting the PSD curve.
 
         Returns
         -------
-        x_range : array-like
-            x values range for plotting.
-        fitted_curve : array-like
-            Fitted curve values.
+        None
         """
         self._model_derivative_functions = {
-            'boltzmann': PSDModels.log_normal,
+            'boltzmann': PSDModels.derivative_boltzmann,
+            'log_normal': PSDModels.log_normal, 
             'sigmoid': PSDModels.derivative_sigmoid,
             'generalized_logistic': PSDModels.derivative_generalized_logistic,
             'gompertz': PSDModels.derivative_gompertz,
             'double_sigmoid': PSDModels.derivative_double_sigmoid
         }
 
-        if model_name not in self._model_functions:
-            raise ValueError(f"Model '{model_name}' is not recognized. Choose from: {list(self._model_functions.keys())}")
+        if model_name not in self._model_derivative_functions:
+            raise ValueError(f"Model '{model_name}' is not recognized. Choose from: {list(self._model_derivative_functions.keys())}")
 
-        self._model_function = self._model_derivative_functions[model_name]
-        self.fit_psd(model_name = model_name)
-        self.fitted_derivative = self._model_function(self.x_range, *self.optimal_parameters)        
+        # Use the derivative function corresponding to the specified model
+        derivative_function = self._model_derivative_functions[model_name]
 
+        # Ensure the model has been fitted first
+        if self.optimal_parameters is None or len(self.optimal_parameters) == 0:
+            raise ValueError("Optimal parameters not available. Fit the model first using fit_sigmoid().")
+
+        # Calculate the derivative (e.g., PSD curve)
+        self.fitted_derivative = derivative_function(self.x_range, *self.optimal_parameters)
+
+        # Calculate PDF parameters
         if self.errors is not None:
-            self.pdf_parameters = DistributionModels.PDF(self.x_values, self.fitted_derivative, self.low_fit, self.high_fit)
+            self.pdf_parameters = DistributionModels.PDF(self.x_range, self.fitted_derivative, self.low_fit, self.high_fit)
         else:
-            self.pdf_parameters = DistributionModels.derivative_sigmoidal(self.x_values, self.fitted_derivative)
-        
-
-        
+            self.pdf_parameters = DistributionModels.derivative_sigmoidal(self.x_range, self.fitted_derivative)

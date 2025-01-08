@@ -3,7 +3,7 @@ from typing import Dict
 import numpy as np
 from rdkit import Chem
 from rdkit.Chem import Descriptors
-from utils import intp90, rmvstr, rej_bounds, read_molecules
+from pore_insight.utils import intp90, rmvstr, rej_bounds, read_molecules
 
 class CurveModels:
     @staticmethod
@@ -27,6 +27,26 @@ class CurveModels:
         return (K1 / (1 + np.exp(-B1 * (x - M1)))) + (K2 / (1 + np.exp(-B2 * (x - M2))))
 
 class PSDModels:
+    @staticmethod
+    def derivative_boltzmann(x, a, b, c, d):
+        """
+        Derivative of the Boltzmann function.
+        
+        Parameters
+        ----------
+        x : array-like
+            Input values.
+        a, b, c, d : float
+            Parameters of the Boltzmann function.
+        
+        Returns
+        -------
+        array-like
+            Derivative of the Boltzmann function at each point in x.
+        """
+        exp_component = np.exp((x - c) / d)
+        return (a - b) * exp_component / (d * (1 + exp_component) ** 2)
+
     @staticmethod
     def log_normal(x, avg_r, std_dev):
         """
