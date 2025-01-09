@@ -6,7 +6,7 @@ from typing import List, Union
 
     
 
-def rej_bounds(rejection,error):
+def rej_bounds(rejection, error):
     """
     Estimates the lower and higher bounds based on rejection errors. Array-like objects should be of the same size.
 
@@ -19,21 +19,17 @@ def rej_bounds(rejection,error):
 
     Returns
     -------
-    rej_low : array-like
+    rej_low : list
         Rejection points in the low bound of error (+).
-    rej_high : array-like
+    rej_high : list
         Rejection points in the high bound of error (-).
     """
+    if len(rejection) != len(error):
+        raise IndexError("rejection and error arrays must have the same length")
 
-    rej_low = []
-    rej_high = []
-    for i in range(0,len(rejection)):
-        l = rejection[i] + error[i]
-        h = rejection[i] - error[i]
-        rej_low.append(l)
-        rej_high.append(h)
-
-    return rej_low, rej_high
+    rej_low = rejection + error
+    rej_high = rejection - error
+    return rej_low.tolist(), rej_high.tolist()
 
 def intp90(r_values,rej_lst):
     """

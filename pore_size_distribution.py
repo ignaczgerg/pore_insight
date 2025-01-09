@@ -54,6 +54,7 @@ class PSD:
             # Automatically invoke PSDInputHandler if required inputs are not provided
             input_handler = PSDInputHandler()
             rejection_values, errors, molecule_weights, molecules_structure = input_handler.get_inputs()
+        
 
         self.rejection_values = rejection_values
         self.errors = errors
@@ -81,6 +82,8 @@ class PSD:
             self.viscosity = Solvents.get(self.solvent).viscosity
             self.alpha = Solvents.get(self.solvent).alpha
 
+        if self.molecule_weights is None and self.molecules_structure is None:
+            raise ValueError("Either 'molecule_weights' or 'molecules_structure' must be provided.")
 
     def _get_volume(self, method='schotte'):
             """
