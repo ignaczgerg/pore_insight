@@ -102,25 +102,33 @@ def test_psd_fit_sigmoid():
     assert 'boltzmann' in psd._initial_params
     assert 'boltzmann' in psd._bounds
 
+
 def test_psd_fit_psd_without_errors():
     rejection_values = np.array([90, 95, 99])
     errors = np.array([1, 2, 3])
     molecule_weights = np.array([100, 200, 300])
     molar_volume = np.array([120, 190, 330])
-    
+
     psd = PSD(
         rejection_values=rejection_values,
         errors=errors,
         molecule_weights=molecule_weights,
         molar_volume=molar_volume
     )
-    
-    # Mock x_values and optimal_parameters
+
+    # Mock x_values, x_range, and optimal_parameters
     psd.x_values = np.array([1, 2, 3])
+    psd.x_range = np.linspace(1, 3, 100)  # Initialize x_range with a valid range
     psd.optimal_parameters = [10, 2, 1, 1]
-    
+
+    # Mock low_fit and high_fit to prevent NoneType errors
+    psd.low_fit = np.array([9, 8, 7])
+    psd.high_fit = np.array([11, 12, 13])
+
+    # Call fit_psd
     psd.fit_psd(model_name='boltzmann')
-    
+
+    # Assertions
     assert 'boltzmann' in psd._model_derivative_functions
     assert hasattr(psd, 'fitted_derivative')
     assert 'pdf_parameters' in psd.__dict__
@@ -201,7 +209,7 @@ def test_psd_missing_molecule_weights_and_structure():
     rejection_values = np.array([90, 95, 99])
     errors = np.array([1, 2, 3])
     
-    with pytest.raises(ValueError):
+    with pytest.raises(ValueError, match="Either 'molecule_weights' or 'molecules_structure' must be provided."):
         PSD(
             rejection_values=rejection_values,
             errors=errors
