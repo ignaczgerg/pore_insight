@@ -111,7 +111,7 @@ class PSDModels:
         array-like
             Derivative of the generalized logistic function at each point in x.
         """
-        numerator = (K - A) * (-B) * Q * np.exp(-B * x)
+        numerator = (K - A) * B * Q * np.exp(-B * x)
         denominator = nu * (C + Q * np.exp(-B * x))**(1 / nu + 1)
         return - numerator / denominator
 
