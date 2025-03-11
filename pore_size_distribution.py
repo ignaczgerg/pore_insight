@@ -1,13 +1,15 @@
 import numpy as np
+from numpy import log, exp
 import argparse
-from scipy.optimize import curve_fit
+from scipy.optimize import curve_fit, root
+from scipy.integrate import quad
 import rdkit
 from rdkit import Chem
 from rdkit.Chem import Descriptors
 
-from pore_insight.utils import rej_bounds, intp90, rmvstr, read_molecules
-from pore_insight.models import CurveModels, DiffusivityCalculator, PSDModels, DistributionModels, MolarVolume, StokesRadiusCalculator
-from pore_insight.models import Solvents
+from utils import rej_bounds, read_molecules
+from models import CurveModels, DiffusivityCalculator, PSDModels, DistributionModels, MolarVolume, StokesRadiusCalculator, AimarMethods
+from models import Solvents
 
 
 class PSDInputHandler:
@@ -49,7 +51,7 @@ class PSDInputHandler:
 class PSD:
     def __init__(self, rejection_values: np.ndarray = None, errors: np.ndarray = None,
                  molecule_weights: np.ndarray = None, molecules_structure: str = None,
-                 solvent='water', temperature=20.0, viscosity=None, alpha=None, molar_volume=None):
+                 solvent='water', temperature=20.0, molecular_weight=None,viscosity=None, alpha=None, molar_volume=None):
         if rejection_values is None or errors is None:
             # Automatically invoke PSDInputHandler if required inputs are not provided
             input_handler = PSDInputHandler()
@@ -67,6 +69,8 @@ class PSD:
         self.high_fit = None
         self.low_fit = None
         self.optimal_parameters = None
+        self.optimal_parameters_low = None
+        self.optimal_parameters_high = None
         self._model_function = None
         self._model_functions = None
         self._initial_params = None
@@ -74,11 +78,13 @@ class PSD:
         self._model_derivative_functions = None
         self.solvent = solvent
         self.temperature = temperature
+        self.molecular_weight = molecular_weight # This is of the solvent
         self.viscosity = viscosity
         self.alpha = alpha
         self.molar_volume = molar_volume
 
         if self.solvent is not None:
+            self.molecular_weight = Solvents.get(self.solvent).molecular_weight
             self.viscosity = Solvents.get(self.solvent).viscosity
             self.alpha = Solvents.get(self.solvent).alpha
 
@@ -107,11 +113,12 @@ class PSD:
 
             elif self.molecule_weights is not None and self.molar_volume is not None:
                 self.diffusivity = np.array([DiffusivityCalculator.wilke_chang_diffusion_coefficient(mol_volume, 
-                                                                                                     mol_weight, 
+                                                                                                     mol_weight, # This should be the molecular weight of the solvent
                                                                                                      self.temperature, 
                                                                                                      self.viscosity, 
                                                                                                      self.alpha) for (mol_volume, mol_weight) in zip(self.molar_volume, self.molecule_weights)])                 
                 # here self.diffusivity is an array of D-s, which are the diffusivity coefficients.
+                # Here in zip(self.molar_volume, self.molecule_weights), self.molecule_weights is the MW of each solute? It should be the MW of the solvent.
                 self.x_values = np.array([StokesRadiusCalculator.stokes_einstein_radius(D, self.temperature, self.viscosity) for D in self.diffusivity])
             
             elif self.molecule_weights is None:
@@ -143,6 +150,7 @@ class PSD:
             Fitted curve values.
         """
         self._model_functions = {
+            'lognormal_CDF': CurveModels.lognormal_CDF,
             'boltzmann': CurveModels.boltzmann,
             'sigmoid': CurveModels.sigmoid,
             'generalized_logistic': CurveModels.generalized_logistic,
@@ -156,6 +164,7 @@ class PSD:
         self._model_function = self._model_functions[model_name]
 
         self._initial_params = {
+            'lognormal_CDF': [np.median(self.x_values),0.1],
             'boltzmann': [-10, 1, np.median(self.x_values), 1],  
             'sigmoid': [0.1, np.median(self.x_values), 1],
             'generalized_logistic': [1, 1, 1, 1, 1, 1],
@@ -164,6 +173,7 @@ class PSD:
         }
 
         self._bounds = {
+            'lognormal_CDF': ([0,0], [np.inf, np.inf]),
             'boltzmann': ([-np.inf, 0, 0, 0], [np.inf, np.inf, np.inf, np.inf]),
             'sigmoid': ([0, 0, 0], [np.inf, np.inf, np.inf]),
             'generalized_logistic': ([0, 0, 0, 0, 0, 0], [np.inf, np.inf, np.inf, np.inf, np.inf, np.inf]),
@@ -175,10 +185,10 @@ class PSD:
 
         if self.errors is not None:
             low_bound, high_bound = rej_bounds(self.rejection_values,self.errors)
-            opt, _ = curve_fit(self._model_function, self.x_values, low_bound, p0=self._initial_params[model_name], bounds=self._bounds[model_name], maxfev=10000)
-            self.low_fit = self._model_function(self.x_range, *opt)
-            opt, _ = curve_fit(self._model_function, self.x_values, high_bound, p0=self._initial_params[model_name], bounds=self._bounds[model_name], maxfev=10000)
-            self.high_fit = self._model_function(self.x_range, *opt)
+            self.optimal_parameters_low, _ = curve_fit(self._model_function, self.x_values, low_bound, p0=self._initial_params[model_name], bounds=self._bounds[model_name], maxfev=10000)
+            self.low_fit = self._model_function(self.x_range, *self.optimal_parameters_low)
+            self.optimal_parameters_high, _ = curve_fit(self._model_function, self.x_values, high_bound, p0=self._initial_params[model_name], bounds=self._bounds[model_name], maxfev=10000)
+            self.high_fit = self._model_function(self.x_range, *self.optimal_parameters_high)
             self.optimal_parameters, _ = curve_fit(self._model_function, self.x_values, self.rejection_values, p0=self._initial_params[model_name], bounds=self._bounds[model_name], maxfev=10000)  
 
         else:
@@ -224,6 +234,125 @@ class PSD:
 
         # Calculate PDF parameters
         if self.errors is not None:
-            self.pdf_parameters = DistributionModels.PDF(self.x_range, self.fitted_derivative, self.low_fit, self.high_fit)
+            self.pdf_parameters = {
+                'radius_mode' : DistributionModels.rp_mode(self.x_range,self.fitted_derivative),
+                'lognormal_STD' : DistributionModels.sigma_FWHM(self.x_range,self.fitted_derivative),
+                'average_radius' : DistributionModels.rp_average(DistributionModels.rp_mode(self.x_range,self.fitted_derivative),DistributionModels.sigma_FWHM(self.x_range,self.fitted_derivative))
+            }
+            
+            # Ensure the model has been fitted first - low bound
+            if self.optimal_parameters_low is None or len(self.optimal_parameters_low) == 0:
+                raise ValueError("Optimal parameters of the low bound are not available.")
+            self.fitted_derivative_low = derivative_function(self.x_range,*self.optimal_parameters_low)
+            self.pdf_parameters_low = {
+                'radius_mode' : DistributionModels.rp_mode(self.x_range,self.fitted_derivative_low),
+                'lognormal_STD' : DistributionModels.sigma_FWHM(self.x_range,self.fitted_derivative_low),
+                'average_radius' : DistributionModels.rp_average(DistributionModels.rp_mode(self.x_range,self.fitted_derivative_low),DistributionModels.sigma_FWHM(self.x_range,self.fitted_derivative_low))
+            }
+
+            # Ensure the model has been fitted first - high bound
+            if self.optimal_parameters_high is None or len(self.optimal_parameters_high) == 0:
+                raise ValueError("Optimal parameters of the high bound are not available.")
+            self.fitted_derivative_high = derivative_function(self.x_range,*self.optimal_parameters_high)
+            self.pdf_parameters_high = {
+                'radius_mode' : DistributionModels.rp_mode(self.x_range,self.fitted_derivative_high),
+                'lognormal_STD' : DistributionModels.sigma_FWHM(self.x_range,self.fitted_derivative_high),
+                'average_radius' : DistributionModels.rp_average(DistributionModels.rp_mode(self.x_range,self.fitted_derivative_high),DistributionModels.sigma_FWHM(self.x_range,self.fitted_derivative_high))
+            }
         else:
-            self.pdf_parameters = DistributionModels.derivative_sigmoidal(self.x_range, self.fitted_derivative)
+            self.pdf_parameters = {
+                'radius_mode' : DistributionModels.rp_mode(self.x_range,self.fitted_derivative),
+                'lognormal_STD' : DistributionModels.sigma_FWHM(self.x_range,self.fitted_derivative),
+                'average_radius' : DistributionModels.rp_average(DistributionModels.rp_mode(self.x_range,self.fitted_derivative),DistributionModels.sigma_FWHM(self.x_range,self.fitted_derivative))
+            }
+
+class TwoPointPSDInputHandler:
+    def __init__(self):
+        self.args = self.parse_args()
+        self.solute_radius_zero = None
+        self.rejection_zero = None
+        self.solute_radius_one = None
+        self.rejection_one = None
+        self._process_args()
+
+    def parse_args(self):
+        parser = argparse.ArgumentParser(description='Two-Point PSD process parameters.')
+        parser.add_argument('--solute_radius_zero', type=float, required=True, help='Solute radius (a) in experimental point (a0,R0)')
+        parser.add_argument('--rejection_zero', type=float, required=True, help='Rejection value (R) in experimental point (a0,R0)')
+        parser.add_argument('--solute_radius_one', type=float, required=True, help='Solute radius (a) in experimental point (a1,R1)')
+        parser.add_argument('--rejection_one', type=float, required=True, help='Rejection value (R) in experimental point (a1,R1)')
+        return parser.parse_args()
+    
+    def validate_inputs(self):
+        if self.solute_radius_zero is not None and self.rejection_zero is None:
+            raise ValueError("solute_radius_zero needs an specified rejection_zero")
+        if self.rejection_zero is not None and self.solute_radius_zero is None:
+            raise ValueError("rejection_zero needs an specified solute_radius_zero")
+        if self.solute_radius_one is not None and self.rejection_one is None:
+            raise ValueError("solute_radius_one needs an specified rejection_one")
+        if self.rejection_one is not None and self.solute_radius_one is None:
+            raise ValueError("rejection_one needs an specified solute_radius_one")
+
+    def _process_args(self):
+        self.solute_radius_zero = self.args.solute_radius_zero
+        self.rejection_zero = self.args.rejection_zero
+        self.solute_radius_one = self.args.solute_radius_one
+        self.rejection_one = self.args.rejection_one
+
+    def get_inputs(self):
+        return self.solute_radius_zero, self.rejection_zero, self.solute_radius_one, self.rejection_one
+
+class TwoPointPSD:
+    def __init__(self, solute_radius_zero: float = None, rejection_zero: float = None,
+                 solute_radius_one: float = None, rejection_one: float = None):
+        if solute_radius_zero is None or solute_radius_one is None:
+            # Automatically invoke PSDInputHandler if required inputs are not provided
+            input_handler = TwoPointPSDInputHandler()
+            solute_radius_zero, rejection_zero, solute_radius_one, rejection_one = input_handler.get_inputs()
+        
+        self.solute_radius_zero = solute_radius_zero
+        self.rejection_zero = rejection_zero
+        self.solute_radius_one = solute_radius_one
+        self.rejection_one = rejection_one
+        self.sigma = None
+        self.r_star = None
+        self.prediction = None
+
+
+    def find_pore_distribution_params(self):
+        """
+        Solve for the dimensionless radius lambda0_star = a0 / r_star and sigma
+        given two experimental data points:
+            (a0, R0) and (a1, R1).
+        Returns:
+            r_star (mean pore radius, in same units as a0, a1)
+            sigma  (geometric standard deviation)
+        """
+        lambda0_star_guess = 1.0
+        sigma_guess = 1.5
+        
+        sol = root(AimarMethods.system_equations, [lambda0_star_guess, sigma_guess], 
+               args=(self.solute_radius_zero, self.rejection_zero, self.solute_radius_one, self.rejection_one))
+    
+        if not sol.success:
+            raise RuntimeError(f"Solver did not converge: {sol.message}")
+        
+        lambda0_star, self.sigma = sol.x
+        # Then r_star = a0 / lambda0_star
+        self.r_star = self.solute_radius_zero / lambda0_star
+
+    def predict_rejection_curve(self,a):
+        """
+        Given a solute radius, a, return the predicted overall rejection,
+        using the found parameters r_star, sigma.
+        """
+        # Ensure the rejection can be predicted first
+        if self.r_star or self.sigma is None:
+            raise ValueError("Distribution parameters not available. A r_star and a sigma value must be provided. Use find_pore_distribution_params().")
+
+        if self.r_star and self.sigma is not None:
+            lambda_star = a / self.r_star
+            self.prediction = {
+                'solute_radius' : a,
+                'predicted_rejection' : AimarMethods.overall_rejection(lambda_star,self.sigma)
+            }

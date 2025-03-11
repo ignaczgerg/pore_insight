@@ -1,11 +1,21 @@
 from dataclasses import dataclass
 from typing import Dict
 import numpy as np
+from numpy import log, exp
 from rdkit import Chem
 from rdkit.Chem import Descriptors
-from pore_insight.utils import intp90, rmvstr, rej_bounds, read_molecules
+from utils import rej_bounds, read_molecules
+import scipy.stats as stats
+from scipy.special import erf
+from scipy.integrate import quad
+from scipy.optimize import root
 
 class CurveModels:
+    @staticmethod
+    def lognormal_CDF(x,r_p,sigma):
+        b = np.log(1 + (sigma / r_p) ** 2)
+        return 0.5 + 0.5 * erf((np.log(x / r_p) + b / 2) / np.sqrt(2 * b))
+    
     @staticmethod
     def boltzmann(x, a, b, c, d):
         return b + (a - b) / (1 + np.exp((x - c) / d))
@@ -160,76 +170,55 @@ class PSDModels:
 
 class DistributionModels:
     @staticmethod
-    def derivative_sigmoidal(r_range,psd_array):
+    def rp_mode(x_dist,y_dist):
         """
-        Distribution parameters from the PSD curve calculated with the derivative of a sigmoidal function.
+        Identifies the peak (maximum point) in the PSD curve.
 
         Parameters
         ----------
-        r_range : array-like
-            Pore radius range for PSD curve.
-        psd_array : array-like
-            Values of the PSD curve calculated with the derivative of a sigmoidal function.
+        x_dist : array-like
+            Pore size x values of the PSD curve.
 
         Returns
-        -------
-        r_avg : float
-            Mean pore radius. Pore radius value corresponding to the maximum point of the PSD curve.
-        SD : float
-            Standard deviation.
+        ----------
+        x_peak : float
+            x value corresponding to the maximum y value.
         """
-        i_max = np.argmax(psd_array)
-        r_avg = round(r_range[i_max],4)
-        SD = round(np.std(r_range,mean=r_avg),4)
-
-        return {'average_radius':r_avg, 'standard_deviation':SD}
-
+        i_max = np.argmax(y_dist)
+        r_mode = round(x_dist[i_max],4) # rp_mode
+        return r_mode
+    
     @staticmethod
-    def PDF(x,rej_fit,low_fit,high_fit):
+    def sigma_FWHM(x_dist,y_dist):
         """
-        Distribution parameters calculated from rejection fitting curves with lower and upper bounds.
-        Radii are taken at 90% rejection from each curve and the average is taken. Standard deviation is then calculated amoung these values.
+        Calculates the log-normal standard deviation (σ*) using the Full Witdh at Half Maximum (FWHM) of the curve.
 
         Parameters
         ----------
-        x : array-like
-            x values range obtained in the curve fitting.
-        rej_fit : array-like
-            Fitted rejection values obtained in the curve fitting.
-        low_fit : array-like
-            Fitted rejection values in the low bound obtained in the curve fitting.
-        high_fit : array-like
-            Fitted rejection values in the high bound obtained in the curve fitting.
+        x_dist : array-like
+            Pore size x values of the PSD curve.
+        y_dist : array-like
+            Density y values of the PSD curve.
 
         Returns
         ----------
-        r_avg : float
-            Mean pore radius. Average radii from the three rejection curves.
-        SD : float
-            Standard deviation among the three radii.
-        r_lst : array-like
-            List of radii at 90% of the lower, normal, and higher rejection bounds. [low bound, normal bound, high bound]
+        sigma : float
+            log-normal standard deviation.
         """
-        r_l = intp90(x,low_fit)
-        r = intp90(x,rej_fit)
-        r_h = intp90(x,high_fit)
-        r_lst = [r_l,r,r_h]
-        
-        dist = rmvstr(r_lst)
-        
-        if not dist:
-            raise ValueError("Unable to calculate distribution parameters. No calculated values at 90% in either bound.")
-        
-        if len(dist) != 0:
-            r_avg = np.average(dist)
-            SD = np.std(dist)
-        else:
-            r_avg, SD = None, None
-
-        if SD == 0:
-            print("\nStandard deviation value is zero. Unable to calculate PDF. Divide by zero will be encountered. Proceed with caution.")
-
-        return {'average_radius':r_avg, 'standard_deviation':SD, 'radius_list':r_lst}
+        i_max = np.argmax(y_dist)
+        y_peak = y_dist[i_max]
+        y_half_max = y_peak / 2
+        i_half_max = np.where(y_dist >= y_half_max)[0]
+        FWHM = x_dist[i_half_max[-1]] - x_dist[i_half_max[0]]
+        median = np.median(x_dist)
+        mu = np.log(median)
+        b = (np.sqrt(2) * np.log(2))**-1
+        sigma = b * np.arcsinh(FWHM / (2 * np.exp(mu)))
+        return sigma
+    
+    @staticmethod
+    def rp_average(rp_mode,sigma):
+        return np.exp( np.log(rp_mode) + sigma**2 )
     
 class MolarVolume:
     @staticmethod
@@ -612,3 +601,75 @@ class Solvents:
         if name not in cls._solvents:
             raise ValueError(f"Solvent '{name}' is not defined.")
         return cls._solvents[name]
+    
+class AimarMethods:
+    def local_rejection(lambda_star, r_dimless):
+        """
+        Local rejection formula for a single pore of dimensionless radius r_dimless.
+        The dimensionless solute radius is lambda_star = a / r*, where r* is the mean (log-normal) pore radius.
+        
+        If a > r (i.e. lambda_star > r_dimless), the pore is 'too small' and blocks the solute => R=1.
+        Otherwise, use the expression [1 - (1 - a/r)^2]^2.
+        """
+        if lambda_star > r_dimless:
+            return 1.0
+        else:
+            return (1.0 - (1.0 - lambda_star / r_dimless)**2) ** 2
+
+    def lognormal_pdf(r_dimless, sigma):
+        """
+        The 'log-normal-like' weight function for pore radii in dimensionless form (r_dimless = r / r*).
+        Only the shape matters here, so the normalization or amplitude is accounted for in the integrals.
+        
+        exp{ - [ln(r_dimless) / ln(sigma)]^2 }
+        """
+        return exp(-(log(r_dimless) / log(sigma))**2)
+    
+    def numerator(self,lambda_star, sigma):
+        """
+        Numerator of the overall rejection integral:
+            ∫ [r^4 * local_rej(a, r) * lognormal_pdf(r, sigma)] dr
+        except here r is dimensionless => r^4 => r_dimless^4
+        """
+        def integrand(r_dimless):
+            return (r_dimless**4) * self.local_rejection(lambda_star, r_dimless) * self.lognormal_pdf(r_dimless, sigma)
+        
+        lower, upper = 1e-6, 1e2
+        val, _ = quad(integrand, lower, upper, limit=200)
+        return val
+
+    def denominator(self,sigma):
+        """
+        Denominator of the overall rejection integral:
+            ∫ [r^4 * lognormal_pdf(r, sigma)] dr
+        i.e. the integral with no local rejection factor.
+        """
+        def integrand(r_dimless):
+            return (r_dimless**4) * self.lognormal_pdf(r_dimless, sigma)
+        
+        lower, upper = 1e-6, 1e2
+        val, _ = quad(integrand, lower, upper, limit=200)
+        return val
+
+    def overall_rejection(self,lambda_star, sigma):
+        """
+        Overall (global) rejection R(a) for dimensionless solute radius lambda_star = a / r*,
+        given a log-normal distribution (sigma) and Poiseuille flow weighting (r^4).
+        """
+        return self.numerator(lambda_star, sigma) / self.denominator(sigma)
+
+    def system_equations(self,vars_, a0, R0, a1, R1):
+        """
+        We define two equations:
+        1) overall_rejection(lambda0_star, sigma) = R0
+        2) overall_rejection((a1/a0)*lambda0_star, sigma) = R1
+        
+        where lambda0_star = a0 / r_star, but we solve for [lambda0_star, sigma] directly.
+        """
+        lambda0_star, sigma = vars_
+        f1 = self.overall_rejection(lambda0_star, sigma) - R0
+        
+        lambda1_star = (a1 / a0) * lambda0_star
+        f2 = self.overall_rejection(lambda1_star, sigma) - R1
+        
+        return [f1, f2]
