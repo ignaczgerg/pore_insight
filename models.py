@@ -222,14 +222,14 @@ class DistributionModels:
     
 class MolarVolume:
     @staticmethod
-    def relation_Schotte(mol):
+    def relation_Schotte(mol_or_mw):
         """
         Estimate the molar volume of a molecule based on its molecular weight using a linear relation (method a).
         Method a: Schotte et al. group contribution theory
 
         Parameters
         ----------
-        mol: rdkit Chem.Mol object for a single molecule.
+        mol_or_mw: rdkit Chem.Mol object or a float molecular weight value for a single molecule for which the molar volume will be estimated.
 
         Returns
         -------
@@ -240,22 +240,23 @@ class MolarVolume:
         - William Schotte, Prediction of the molar volume at the normal boiling point, The Chemical Engineering Journal, Volume 48, Issue 3, 1992, Pages 167-172, ISSN 0300-9467
         - https://doi.org/10.1016/0300-9467(92)80032-6
         """
-        try:
-            x = Descriptors.MolWt(mol)
-        except:
+        if isinstance(mol_or_mw,Chem.Mol):
+            mw = Descriptors.MolWt(mol_or_mw)
+        elif isinstance(mol_or_mw,(float,int)):
+            mw = mol_or_mw
+        else:
             raise ValueError("RDKit Mol object not found. Please provide a valid RDKit Mol object.")
-        return 1.3348 * x - 10.552
+        return 1.3348 * mw - 10.552
 
     @staticmethod
-    def relation_Wu(mol):
+    def relation_Wu(mol_or_mw):
         """
         Estimate the molar volume of a molecule based on its molecular weight using a linear relation (method b).
         Method b: Wu et al. group contribution theory
 
         Parameters
         ----------
-        x : float
-            Molecular weight of the molecule for which the molar volume will be estimated.
+        mol_or_mw: rdkit Chem.Mol object or a float molecular weight value for a single molecule for which the molar volume will be estimated.
 
         Returns
         -------
@@ -266,11 +267,13 @@ class MolarVolume:
         - Albert X. Wu, Sharon Lin, Katherine Mizrahi Rodriguez, Francesco M. Benedetti, Taigyu Joo, Aristotle F. Grosz, Kayla R. Storme, Naksha Roy, Duha Syar, Zachary P. Smith, Revisiting group contribution theory for estimating fractional free volume of microporous polymer membranes, Journal of Membrane Science, Volume 636, 2021, 119526, ISSN 0376-7388
         - https://doi.org/10.1016/j.memsci.2021.119526
         """
-        try:
-            x = Descriptors.MolWt(mol)
-        except:
+        if isinstance(mol_or_mw,Chem.Mol):
+            mw = Descriptors.MolWt(mol_or_mw)
+        elif isinstance(mol_or_mw,(float,int)):
+            mw = mol_or_mw
+        else:
             raise ValueError("RDKit Mol object not found. Please provide a valid RDKit Mol object.")
-        return 1.1353*x + 3.8219
+        return 1.1353* mw + 3.8219
 
     @staticmethod
     def joback(mol: Chem.Mol):
@@ -575,7 +578,6 @@ class DiffusivityCalculator:
     @staticmethod
     def wilke_chang_diffusion_coefficient(molar_volume, molecular_weight, temp, viscosity, alpha):
         d = (7.4E-8) * temp * np.sqrt(alpha * molecular_weight) / (viscosity * (alpha * molar_volume)**0.6)
-        # d = float(d) # The value was being printed like: [np.float64(5.497635472812708e-06), np.float64(4.708457138648548e-06), np.float64(4.194534214640366e-06), np.float64(3.7831496747983576e-06)]
         return d
 
 
@@ -603,6 +605,7 @@ class Solvents:
         return cls._solvents[name]
     
 class AimarMethods:
+    @staticmethod
     def local_rejection(lambda_star, r_dimless):
         """
         Local rejection formula for a single pore of dimensionless radius r_dimless.
@@ -616,6 +619,7 @@ class AimarMethods:
         else:
             return (1.0 - (1.0 - lambda_star / r_dimless)**2) ** 2
 
+    @staticmethod
     def lognormal_pdf(r_dimless, sigma):
         """
         The 'log-normal-like' weight function for pore radii in dimensionless form (r_dimless = r / r*).
@@ -624,52 +628,3 @@ class AimarMethods:
         exp{ - [ln(r_dimless) / ln(sigma)]^2 }
         """
         return exp(-(log(r_dimless) / log(sigma))**2)
-    
-    def numerator(self,lambda_star, sigma):
-        """
-        Numerator of the overall rejection integral:
-            ∫ [r^4 * local_rej(a, r) * lognormal_pdf(r, sigma)] dr
-        except here r is dimensionless => r^4 => r_dimless^4
-        """
-        def integrand(r_dimless):
-            return (r_dimless**4) * self.local_rejection(lambda_star, r_dimless) * self.lognormal_pdf(r_dimless, sigma)
-        
-        lower, upper = 1e-6, 1e2
-        val, _ = quad(integrand, lower, upper, limit=200)
-        return val
-
-    def denominator(self,sigma):
-        """
-        Denominator of the overall rejection integral:
-            ∫ [r^4 * lognormal_pdf(r, sigma)] dr
-        i.e. the integral with no local rejection factor.
-        """
-        def integrand(r_dimless):
-            return (r_dimless**4) * self.lognormal_pdf(r_dimless, sigma)
-        
-        lower, upper = 1e-6, 1e2
-        val, _ = quad(integrand, lower, upper, limit=200)
-        return val
-
-    def overall_rejection(self,lambda_star, sigma):
-        """
-        Overall (global) rejection R(a) for dimensionless solute radius lambda_star = a / r*,
-        given a log-normal distribution (sigma) and Poiseuille flow weighting (r^4).
-        """
-        return self.numerator(lambda_star, sigma) / self.denominator(sigma)
-
-    def system_equations(self,vars_, a0, R0, a1, R1):
-        """
-        We define two equations:
-        1) overall_rejection(lambda0_star, sigma) = R0
-        2) overall_rejection((a1/a0)*lambda0_star, sigma) = R1
-        
-        where lambda0_star = a0 / r_star, but we solve for [lambda0_star, sigma] directly.
-        """
-        lambda0_star, sigma = vars_
-        f1 = self.overall_rejection(lambda0_star, sigma) - R0
-        
-        lambda1_star = (a1 / a0) * lambda0_star
-        f2 = self.overall_rejection(lambda1_star, sigma) - R1
-        
-        return [f1, f2]

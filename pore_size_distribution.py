@@ -24,7 +24,7 @@ class PSDInputHandler:
     def parse_args(self):
         parser = argparse.ArgumentParser(description='Process PSD parameters.')
         parser.add_argument('--rejection_values', type=float, nargs='+', required=True, help='List of rejection values')
-        parser.add_argument('--errors', type=float, nargs='+', required=True, help='List of errors')
+        parser.add_argument('--errors', type=float, nargs='+', required=True, help='List of errors') # Errors should be optinal!
         parser.add_argument('--molecule_weights', type=float, nargs='+', help='List of molecule weights')
         parser.add_argument('--molecules_structure', type=str, help='Molecule structure')
         return parser.parse_args()
@@ -51,7 +51,7 @@ class PSDInputHandler:
 class PSD:
     def __init__(self, rejection_values: np.ndarray = None, errors: np.ndarray = None,
                  molecule_weights: np.ndarray = None, molecules_structure: str = None,
-                 solvent='water', temperature=20.0, molecular_weight=None,viscosity=None, alpha=None, molar_volume=None):
+                 solvent='water', temperature=20.0, molecular_weight: float = None,viscosity=None, alpha=None, molar_volume=None):
         if rejection_values is None or errors is None:
             # Automatically invoke PSDInputHandler if required inputs are not provided
             input_handler = PSDInputHandler()
@@ -78,15 +78,14 @@ class PSD:
         self._model_derivative_functions = None
         self.solvent = solvent
         self.temperature = temperature
-        self.molecular_weight = molecular_weight # This is of the solvent
-        self.viscosity = viscosity
         self.alpha = alpha
         self.molar_volume = molar_volume
 
-        if self.solvent is not None:
-            self.molecular_weight = Solvents.get(self.solvent).molecular_weight
-            self.viscosity = Solvents.get(self.solvent).viscosity
+        if self.solvent is not None: # It was overwritting the specified solvent MW and viscosity with None if it the solvent was 'other'
             self.alpha = Solvents.get(self.solvent).alpha
+            self.molecular_weight = molecular_weight if molecular_weight is not None else Solvents.get(self.solvent).molecular_weight
+            self.viscosity = viscosity if viscosity is not None else Solvents.get(self.solvent).viscosity
+        
 
         if self.molecule_weights is None and self.molecules_structure is None:
             raise ValueError("Either 'molecule_weights' or 'molecules_structure' must be provided.")
@@ -103,22 +102,25 @@ class PSD:
             if method not in volume_functions:
                 raise ValueError(f"Method '{method}' is not recognized. Choose from: {list(volume_functions.keys())}")
             
+            if self.molecule_weights is not None:
+                self._mols = self.molecule_weights
+                self.molar_volume = np.array([volume_functions[method](mol) for mol in self._mols])
+            
             if self.molecules_structure is not None:
                 try:
                     self._mols = read_molecules(self.molecules_structure)
                 except Exception as e:
                     print(e)
                     raise ValueError("Invalid molecule structure provided. Check documentation for valid input format.")
-                self.x_values = np.array([volume_functions[method](mol) for mol in self._mols])
+                self.molar_volume = np.array([volume_functions[method](mol) for mol in self._mols])
 
-            elif self.molecule_weights is not None and self.molar_volume is not None:
+            if self.molar_volume is not None:
                 self.diffusivity = np.array([DiffusivityCalculator.wilke_chang_diffusion_coefficient(mol_volume, 
-                                                                                                     mol_weight, # This should be the molecular weight of the solvent
+                                                                                                     self.molecular_weight, # This is the solvent, single value.
                                                                                                      self.temperature, 
                                                                                                      self.viscosity, 
-                                                                                                     self.alpha) for (mol_volume, mol_weight) in zip(self.molar_volume, self.molecule_weights)])                 
+                                                                                                     self.alpha) for mol_volume in self.molar_volume])                 
                 # here self.diffusivity is an array of D-s, which are the diffusivity coefficients.
-                # Here in zip(self.molar_volume, self.molecule_weights), self.molecule_weights is the MW of each solute? It should be the MW of the solvent.
                 self.x_values = np.array([StokesRadiusCalculator.stokes_einstein_radius(D, self.temperature, self.viscosity) for D in self.diffusivity])
             
             elif self.molecule_weights is None:
@@ -318,8 +320,61 @@ class TwoPointPSD:
         self.r_star = None
         self.prediction = None
 
+    def numerator(self,lambda_star, sigma):
+        """
+        Numerator of the overall rejection integral:
+            ∫ [r^4 * local_rej(a, r) * lognormal_pdf(r, sigma)] dr
+        except here r is dimensionless => r^4 => r_dimless^4
+        """
+        def integrand(r_dimless):
+            return (r_dimless**4) * AimarMethods.local_rejection(lambda_star, r_dimless) * AimarMethods.lognormal_pdf(r_dimless, sigma)
+        
+        lower, upper = 1e-6, 1e2
+        val, _ = quad(integrand, lower, upper, limit=200)
+        return val
 
-    def find_pore_distribution_params(self):
+    def denominator(self,sigma):
+        """
+        Denominator of the overall rejection integral:
+            ∫ [r^4 * lognormal_pdf(r, sigma)] dr
+        i.e. the integral with no local rejection factor.
+        """
+        def integrand(r_dimless):
+            return (r_dimless**4) * AimarMethods.lognormal_pdf(r_dimless, sigma)
+        
+        lower, upper = 1e-6, 1e2
+        val, _ = quad(integrand, lower, upper, limit=200)
+        return val
+
+    def overall_rejection(self,lambda_star, sigma):
+        """
+        Overall (global) rejection R(a) for dimensionless solute radius lambda_star = a / r*,
+        given a log-normal distribution (sigma) and Poiseuille flow weighting (r^4).
+        """
+        return self.numerator(lambda_star, sigma) / self.denominator(sigma)
+    
+    def system_equations(self,vars_):
+        """
+        We define two equations:
+        1) overall_rejection(lambda0_star, sigma) = R0
+        2) overall_rejection((a1/a0)*lambda0_star, sigma) = R1
+        
+        where lambda0_star = a0 / r_star, but we solve for [lambda0_star, sigma] directly.
+        """
+        lambda0_star, sigma = vars_
+        a0 = self.solute_radius_zero
+        R0 = self.rejection_zero
+        a1 = self.solute_radius_one
+        R1 = self.rejection_one
+
+        f1 = self.overall_rejection(lambda0_star, sigma) - R0
+        
+        lambda1_star = (a1 / a0) * lambda0_star
+        f2 = self.overall_rejection(lambda1_star, sigma) - R1
+        
+        return [f1, f2]
+    
+    def find_pore_distribution_params(self, lambda0_star_guess=1.0, sigma_guess=1.5):
         """
         Solve for the dimensionless radius lambda0_star = a0 / r_star and sigma
         given two experimental data points:
@@ -328,11 +383,7 @@ class TwoPointPSD:
             r_star (mean pore radius, in same units as a0, a1)
             sigma  (geometric standard deviation)
         """
-        lambda0_star_guess = 1.0
-        sigma_guess = 1.5
-        
-        sol = root(AimarMethods.system_equations, [lambda0_star_guess, sigma_guess], 
-               args=(self.solute_radius_zero, self.rejection_zero, self.solute_radius_one, self.rejection_one))
+        sol = root(self.system_equations, [lambda0_star_guess, sigma_guess])
     
         if not sol.success:
             raise RuntimeError(f"Solver did not converge: {sol.message}")
@@ -341,18 +392,22 @@ class TwoPointPSD:
         # Then r_star = a0 / lambda0_star
         self.r_star = self.solute_radius_zero / lambda0_star
 
+        self.lognormal_parameters = {
+            'average_radius' : self.r_star,
+            'lognormal_STD' : self.sigma
+        }
+
     def predict_rejection_curve(self,a):
         """
         Given a solute radius, a, return the predicted overall rejection,
         using the found parameters r_star, sigma.
         """
-        # Ensure the rejection can be predicted first
-        if self.r_star or self.sigma is None:
-            raise ValueError("Distribution parameters not available. A r_star and a sigma value must be provided. Use find_pore_distribution_params().")
 
         if self.r_star and self.sigma is not None:
             lambda_star = a / self.r_star
             self.prediction = {
                 'solute_radius' : a,
-                'predicted_rejection' : AimarMethods.overall_rejection(lambda_star,self.sigma)
+                'predicted_rejection' : self.overall_rejection(lambda_star,self.sigma)
             }
+        else:
+            raise ValueError("Distribution parameters not available. A r_star and a sigma value must be provided. Use find_pore_distribution_params().")
