@@ -595,6 +595,18 @@ class Solvents:
         "water": Solvent(name="water", molecular_weight=18.01528, viscosity=0.001, alpha=2.6),
         "methanol": Solvent(name="methanol", molecular_weight=32.042, viscosity=0.0006, alpha=1.9),
         "ethanol": Solvent(name="ethanol", molecular_weight=46.069, viscosity=0.0012, alpha=1.5),
+        "ethyl_acetate": Solvent(name="ethyl_acetate", molecular_weight=88.106, viscosity=0.00046, alpha=1.0),
+        "acetone": Solvent(name="acetone", molecular_weight=58.08, viscosity=0.0003, alpha=1.06),
+        "toluene": Solvent(name="toluene", molecular_weight=92.141, viscosity=0.0006, alpha=1.0),
+        "hexane": Solvent(name="hexane", molecular_weight=86.177, viscosity=0.00032, alpha=1.0),
+        "heptane": Solvent(name="heptane", molecular_weight=100.204, viscosity=0.00042, alpha=1.0),
+        "acetonitrile": Solvent(name="acetonitrile", molecular_weight=41.053, viscosity=0.00037, alpha=1.48),
+        "anisol": Solvent(name="anisol", molecular_weight=108.14, viscosity=0.0012, alpha=1.02),
+        "dioxane": Solvent(name="dioxane", molecular_weight=88.106, viscosity=0.0012, alpha=1.07),
+        "pyridine": Solvent(name="pyridine", molecular_weight=79.101, viscosity=0.00095, alpha=1.24),
+        "aniline": Solvent(name="aniline", molecular_weight=93.13, viscosity=0.00102, alpha=1.43),
+        "propanol": Solvent(name="propanol", molecular_weight=60.096, viscosity=0.0022, alpha=1.5),
+        "butyl_acetate": Solvent(name="butyl_acetate", molecular_weight=116.161, viscosity=0.000732, alpha=1.0),
         "other": Solvent(name="other", molecular_weight=None, viscosity=None, alpha=1.0),
     }
 
