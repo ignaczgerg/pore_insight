@@ -1,11 +1,21 @@
 from dataclasses import dataclass
 from typing import Dict
 import numpy as np
+from numpy import log, exp
 from rdkit import Chem
 from rdkit.Chem import Descriptors
-from pore_insight.utils import intp90, rmvstr, rej_bounds, read_molecules
+from pore_insight.utils import rej_bounds, read_molecules
+import scipy.stats as stats
+from scipy.special import erf
+from scipy.integrate import quad
+from scipy.optimize import root
 
 class CurveModels:
+    @staticmethod
+    def lognormal_CDF(x,r_p,sigma):
+        b = np.log(1 + (sigma / r_p) ** 2)
+        return 0.5 + 0.5 * erf((np.log(x / r_p) + b / 2) / np.sqrt(2 * b))
+    
     @staticmethod
     def boltzmann(x, a, b, c, d):
         return b + (a - b) / (1 + np.exp((x - c) / d))
@@ -160,87 +170,66 @@ class PSDModels:
 
 class DistributionModels:
     @staticmethod
-    def derivative_sigmoidal(r_range,psd_array):
+    def rp_mode(x_dist,y_dist):
         """
-        Distribution parameters from the PSD curve calculated with the derivative of a sigmoidal function.
+        Identifies the peak (maximum point) in the PSD curve.
 
         Parameters
         ----------
-        r_range : array-like
-            Pore radius range for PSD curve.
-        psd_array : array-like
-            Values of the PSD curve calculated with the derivative of a sigmoidal function.
+        x_dist : array-like
+            Pore size x values of the PSD curve.
 
         Returns
-        -------
-        r_avg : float
-            Mean pore radius. Pore radius value corresponding to the maximum point of the PSD curve.
-        SD : float
-            Standard deviation.
+        ----------
+        x_peak : float
+            x value corresponding to the maximum y value.
         """
-        i_max = np.argmax(psd_array)
-        r_avg = round(r_range[i_max],4)
-        SD = round(np.std(r_range,mean=r_avg),4)
-
-        return {'average_radius':r_avg, 'standard_deviation':SD}
-
+        i_max = np.argmax(y_dist)
+        r_mode = round(x_dist[i_max],4) # rp_mode
+        return r_mode
+    
     @staticmethod
-    def PDF(x,rej_fit,low_fit,high_fit):
+    def sigma_FWHM(x_dist,y_dist):
         """
-        Distribution parameters calculated from rejection fitting curves with lower and upper bounds.
-        Radii are taken at 90% rejection from each curve and the average is taken. Standard deviation is then calculated amoung these values.
+        Calculates the log-normal standard deviation (σ*) using the Full Witdh at Half Maximum (FWHM) of the curve.
 
         Parameters
         ----------
-        x : array-like
-            x values range obtained in the curve fitting.
-        rej_fit : array-like
-            Fitted rejection values obtained in the curve fitting.
-        low_fit : array-like
-            Fitted rejection values in the low bound obtained in the curve fitting.
-        high_fit : array-like
-            Fitted rejection values in the high bound obtained in the curve fitting.
+        x_dist : array-like
+            Pore size x values of the PSD curve.
+        y_dist : array-like
+            Density y values of the PSD curve.
 
         Returns
         ----------
-        r_avg : float
-            Mean pore radius. Average radii from the three rejection curves.
-        SD : float
-            Standard deviation among the three radii.
-        r_lst : array-like
-            List of radii at 90% of the lower, normal, and higher rejection bounds. [low bound, normal bound, high bound]
+        sigma : float
+            log-normal standard deviation.
         """
-        r_l = intp90(x,low_fit)
-        r = intp90(x,rej_fit)
-        r_h = intp90(x,high_fit)
-        r_lst = [r_l,r,r_h]
-        
-        dist = rmvstr(r_lst)
-        
-        if not dist:
-            raise ValueError("Unable to calculate distribution parameters. No calculated values at 90% in either bound.")
-        
-        if len(dist) != 0:
-            r_avg = np.average(dist)
-            SD = np.std(dist)
-        else:
-            r_avg, SD = None, None
-
-        if SD == 0:
-            print("\nStandard deviation value is zero. Unable to calculate PDF. Divide by zero will be encountered. Proceed with caution.")
-
-        return {'average_radius':r_avg, 'standard_deviation':SD, 'radius_list':r_lst}
+        i_max = np.argmax(y_dist)
+        y_peak = y_dist[i_max]
+        y_half_max = y_peak / 2
+        i_half_max = np.where(y_dist >= y_half_max)[0]
+        FWHM = x_dist[i_half_max[-1]] - x_dist[i_half_max[0]]
+        median = np.median(x_dist)
+        mu = np.log(median)
+        b = (np.sqrt(2) * np.log(2))**-1
+        sigma = b * np.arcsinh(FWHM / (2 * np.exp(mu)))
+        return sigma
+    
+    @staticmethod
+    def rp_average(rp_mode,sigma):
+        return np.exp( np.log(rp_mode) + sigma**2 )
     
 class MolarVolume:
     @staticmethod
-    def relation_Schotte(mol):
+    def relation_Schotte(mol_or_mw):
         """
         Estimate the molar volume of a molecule based on its molecular weight using a linear relation (method a).
         Method a: Schotte et al. group contribution theory
 
         Parameters
         ----------
-        mol: rdkit Chem.Mol object for a single molecule.
+        mol_or_mw: rdkit Chem.Mol object or a float molecular weight value for a single molecule for which the molar volume will be estimated.
 
         Returns
         -------
@@ -251,22 +240,23 @@ class MolarVolume:
         - William Schotte, Prediction of the molar volume at the normal boiling point, The Chemical Engineering Journal, Volume 48, Issue 3, 1992, Pages 167-172, ISSN 0300-9467
         - https://doi.org/10.1016/0300-9467(92)80032-6
         """
-        try:
-            x = Descriptors.MolWt(mol)
-        except:
+        if isinstance(mol_or_mw,Chem.Mol):
+            mw = Descriptors.MolWt(mol_or_mw)
+        elif isinstance(mol_or_mw,(float,int)):
+            mw = mol_or_mw
+        else:
             raise ValueError("RDKit Mol object not found. Please provide a valid RDKit Mol object.")
-        return 1.3348 * x - 10.552
+        return 1.3348 * mw - 10.552
 
     @staticmethod
-    def relation_Wu(mol):
+    def relation_Wu(mol_or_mw):
         """
         Estimate the molar volume of a molecule based on its molecular weight using a linear relation (method b).
         Method b: Wu et al. group contribution theory
 
         Parameters
         ----------
-        x : float
-            Molecular weight of the molecule for which the molar volume will be estimated.
+        mol_or_mw: rdkit Chem.Mol object or a float molecular weight value for a single molecule for which the molar volume will be estimated.
 
         Returns
         -------
@@ -277,11 +267,13 @@ class MolarVolume:
         - Albert X. Wu, Sharon Lin, Katherine Mizrahi Rodriguez, Francesco M. Benedetti, Taigyu Joo, Aristotle F. Grosz, Kayla R. Storme, Naksha Roy, Duha Syar, Zachary P. Smith, Revisiting group contribution theory for estimating fractional free volume of microporous polymer membranes, Journal of Membrane Science, Volume 636, 2021, 119526, ISSN 0376-7388
         - https://doi.org/10.1016/j.memsci.2021.119526
         """
-        try:
-            x = Descriptors.MolWt(mol)
-        except:
+        if isinstance(mol_or_mw,Chem.Mol):
+            mw = Descriptors.MolWt(mol_or_mw)
+        elif isinstance(mol_or_mw,(float,int)):
+            mw = mol_or_mw
+        else:
             raise ValueError("RDKit Mol object not found. Please provide a valid RDKit Mol object.")
-        return 1.1353*x + 3.8219
+        return 1.1353* mw + 3.8219
 
     @staticmethod
     def joback(mol: Chem.Mol):
@@ -586,7 +578,6 @@ class DiffusivityCalculator:
     @staticmethod
     def wilke_chang_diffusion_coefficient(molar_volume, molecular_weight, temp, viscosity, alpha):
         d = (7.4E-8) * temp * np.sqrt(alpha * molecular_weight) / (viscosity * (alpha * molar_volume)**0.6)
-        # d = float(d) # The value was being printed like: [np.float64(5.497635472812708e-06), np.float64(4.708457138648548e-06), np.float64(4.194534214640366e-06), np.float64(3.7831496747983576e-06)]
         return d
 
 
@@ -594,17 +585,29 @@ class DiffusivityCalculator:
 @dataclass
 class Solvent:
     name: str
-    molecular_weight: float
+    solvent_mol_weight: float
     viscosity: float
     alpha: float
 
 
 class Solvents:
     _solvents: Dict[str, Solvent] = {
-        "water": Solvent(name="water", molecular_weight=18.01528, viscosity=0.001, alpha=2.6),
-        "methanol": Solvent(name="methanol", molecular_weight=32.042, viscosity=0.0006, alpha=1.9),
-        "ethanol": Solvent(name="ethanol", molecular_weight=46.069, viscosity=0.0012, alpha=1.5),
-        "other": Solvent(name="other", molecular_weight=None, viscosity=None, alpha=1.0),
+        "water": Solvent(name="water", solvent_mol_weight=18.01528, viscosity=0.001, alpha=2.6),
+        "methanol": Solvent(name="methanol", solvent_mol_weight=32.042, viscosity=0.0006, alpha=1.9),
+        "ethanol": Solvent(name="ethanol", solvent_mol_weight=46.069, viscosity=0.0012, alpha=1.5),
+        "ethyl_acetate": Solvent(name="ethyl_acetate", solvent_mol_weight=88.106, viscosity=0.00046, alpha=1.0),
+        "acetone": Solvent(name="acetone", solvent_mol_weight=58.08, viscosity=0.0003, alpha=1.06),
+        "toluene": Solvent(name="toluene", solvent_mol_weight=92.141, viscosity=0.0006, alpha=1.0),
+        "hexane": Solvent(name="hexane", solvent_mol_weight=86.177, viscosity=0.00032, alpha=1.0),
+        "heptane": Solvent(name="heptane", solvent_mol_weight=100.204, viscosity=0.00042, alpha=1.0),
+        "acetonitrile": Solvent(name="acetonitrile", solvent_mol_weight=41.053, viscosity=0.00037, alpha=1.48),
+        "anisol": Solvent(name="anisol", solvent_mol_weight=108.14, viscosity=0.0012, alpha=1.02),
+        "dioxane": Solvent(name="dioxane", solvent_mol_weight=88.106, viscosity=0.0012, alpha=1.07),
+        "pyridine": Solvent(name="pyridine", solvent_mol_weight=79.101, viscosity=0.00095, alpha=1.24),
+        "aniline": Solvent(name="aniline", solvent_mol_weight=93.13, viscosity=0.00102, alpha=1.43),
+        "propanol": Solvent(name="propanol", solvent_mol_weight=60.096, viscosity=0.0022, alpha=1.5),
+        "butyl_acetate": Solvent(name="butyl_acetate", solvent_mol_weight=116.161, viscosity=0.000732, alpha=1.0),
+        "other": Solvent(name="other", solvent_mol_weight=None, viscosity=None, alpha=1.0),
     }
 
     @classmethod
@@ -612,3 +615,28 @@ class Solvents:
         if name not in cls._solvents:
             raise ValueError(f"Solvent '{name}' is not defined.")
         return cls._solvents[name]
+    
+class AimarMethods:
+    @staticmethod
+    def local_rejection(lambda_star, r_dimless):
+        """
+        Local rejection formula for a single pore of dimensionless radius r_dimless.
+        The dimensionless solute radius is lambda_star = a / r*, where r* is the mean (log-normal) pore radius.
+        
+        If a > r (i.e. lambda_star > r_dimless), the pore is 'too small' and blocks the solute => R=1.
+        Otherwise, use the expression [1 - (1 - a/r)^2]^2.
+        """
+        if lambda_star > r_dimless:
+            return 1.0
+        else:
+            return (1.0 - (1.0 - lambda_star / r_dimless)**2) ** 2
+
+    @staticmethod
+    def lognormal_pdf(r_dimless, sigma):
+        """
+        The 'log-normal-like' weight function for pore radii in dimensionless form (r_dimless = r / r*).
+        Only the shape matters here, so the normalization or amplitude is accounted for in the integrals.
+        
+        exp{ - [ln(r_dimless) / ln(sigma)]^2 }
+        """
+        return exp(-(log(r_dimless) / log(sigma))**2)
