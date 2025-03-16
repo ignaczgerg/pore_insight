@@ -1,9 +1,6 @@
 import numpy as np
 from rdkit import Chem
 from typing import List, Union
-
-
-
     
 
 def rej_bounds(rejection, error):
