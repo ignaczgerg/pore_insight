@@ -106,18 +106,48 @@ membrane_2_psd = psd.PSD(
 # Calculate molar volumes using Joback method
 membrane_2_psd.calculate_radius(method='joback')
 
-# Access calculated x_values (e.g., pore radii)
 print("Pore Radii:", membrane_2_psd.x_radii)
 
-# Fit the curve using the Sigmoid model
 membrane_2_psd.fit_sigmoid(model_name='sigmoid')
 
-# Fit the PSD curve
 membrane_2_psd.fit_psd(model_name='sigmoid')
 
-# Access PDF parameters
 print("PDF Parameters:", membrane_2_psd.pdf_parameters)
 ```
+
+### Example 3: Two point method
+```python
+import numpy as np
+import pore_insight
+from pore_insight import pore_size_distribution as psd
+
+# Two point Aimar methodology
+rs = np.array([0.264,0.409,0.400,0.383,0.424,0.530,0.804,0.570]) # nm
+rejections = np.array([22.67,60.00,67.40,66.90,72.09,74.16,100,100])/100 #%
+
+r0, r1 = 4,3
+
+a0_example = rs[r0] # nm
+R0_example = rejections[r0]
+a1_example = rs[r1] # nm
+R1_example = rejections[r1]
+
+twopoints = psd.TwoPointPSD(
+    solute_radius_zero=a0_example,
+    rejection_zero=R0_example,
+    solute_radius_one=a1_example,
+    rejection_one=R1_example
+)
+
+print("\nExample 3 - Two Points Method")
+
+twopoints.find_pore_distribution_params()
+print("log-normal Parameters",twopoints.lognormal_parameters)
+
+twopoints.predict_rejection_curve(a = 0.264)
+print("Retention prediction:",twopoints.prediction)
+```
+
 
 ## Contributing
 Contributions are welcome! Please open an issue or submit a pull request for any bugs, features, or enhancements.
