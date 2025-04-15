@@ -14,6 +14,8 @@
 ## Overview
 PoreInsight is a Python-based application designed to analyze and model pore size distributions (PSD) of membrane materials. The application is buildt on scientific libraries such as RDKit, NumPy, and SciPy, this tool provides a comprehensive suite of functionalities including curve fitting, diffusivity calculations, and molar volume estimations based on molecular structures.
 
+**Note: the web-based version of the package has a known issue, where it returns different values for some data compared to the package. We suggest users to use the github version while we work on the solution.**
+
 ## Features
 - Curve Fitting Models: Supports various curve fitting models like Boltzmann, Sigmoid, Generalized Logistic, Gompertz, and Double Sigmoid.
 - Pore Size Distribution Models: Includes log-normal distribution and derivatives of sigmoid-based models.
