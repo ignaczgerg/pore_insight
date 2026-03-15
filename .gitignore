@@ -3,3 +3,11 @@ __pycache__/
 test.ipynb  
 PoreInsight.egg-info/
 pore_insight.egg-info/
+
+get_smiles.py
+example.ipynb
+nature.mplstyle
+images/*
+data/*
+example.py
+.DS_Store

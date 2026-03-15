@@ -9,12 +9,13 @@ import scipy.stats as stats
 from scipy.special import erf
 from scipy.integrate import quad
 from scipy.optimize import root
+from pore_insight import logger
 
 class CurveModels:
     @staticmethod
-    def lognormal_CDF(x,r_p,sigma):
+    def lognormal_CDF(x, r_p, sigma, scale):
         b = np.log(1 + (sigma / r_p) ** 2)
-        return 0.5 + 0.5 * erf((np.log(x / r_p) + b / 2) / np.sqrt(2 * b))
+        return scale * (0.5 + 0.5 * erf((np.log(x / r_p) + b / 2) / np.sqrt(2 * b)))
     
     @staticmethod
     def boltzmann(x, a, b, c, d):
@@ -58,10 +59,10 @@ class PSDModels:
         return (a - b) * exp_component / (d * (1 + exp_component) ** 2)
 
     @staticmethod
-    def log_normal(x, avg_r, std_dev):
+    def log_normal(x, avg_r, std_dev, scale):
         """
         Calculates the pore size distribution using the log-normal probability density function.
-        
+
         Parameters
         ----------
         x : array-like
@@ -70,6 +71,8 @@ class PSDModels:
             Average pore size radius.
         std_dev : float
             Standard deviation of the pore size distribution.
+        scale : float
+            Scaling factor matching the CDF (e.g. 100 for rejection in %).
 
         Returns
         -------
@@ -78,7 +81,7 @@ class PSDModels:
         """
         b = np.log(1 + (std_dev / avg_r)**2)
         c1 = 1 / np.sqrt(2 * np.pi * b)
-        return c1 * (1 / x) * np.exp(-((np.log(x / avg_r) + b / 2)**2) / (2 * b)) 
+        return scale * c1 * (1 / x) * np.exp(-((np.log(x / avg_r) + b / 2)**2) / (2 * b))
 
     @staticmethod
     def derivative_sigmoid(x, a, b, c):
@@ -209,16 +212,19 @@ class DistributionModels:
         y_peak = y_dist[i_max]
         y_half_max = y_peak / 2
         i_half_max = np.where(y_dist >= y_half_max)[0]
+        if len(i_half_max) == 0:
+            return np.nan
         FWHM = x_dist[i_half_max[-1]] - x_dist[i_half_max[0]]
-        median = np.median(x_dist)
-        mu = np.log(median)
-        b = (np.sqrt(2) * np.log(2))**-1
+        mu = np.log(x_dist[i_max])  # approximate exp(μ) by the mode
+        b = (np.sqrt(2 * np.log(2)))**-1
         sigma = b * np.arcsinh(FWHM / (2 * np.exp(mu)))
         return sigma
     
     @staticmethod
-    def rp_average(rp_mode,sigma):
-        return np.exp( np.log(rp_mode) + sigma**2 )
+    def rp_average(rp_mode, sigma):
+        # For lognormal: mode = exp(μ - σ²), mean = exp(μ + σ²/2)
+        # → mean = exp(ln(mode) + σ² + σ²/2) = exp(ln(mode) + 3σ²/2)
+        return np.exp(np.log(rp_mode) + 1.5 * sigma**2)
     
 class MolarVolume:
     @staticmethod
@@ -473,8 +479,7 @@ class MolarVolume:
         for i in range(0, 41):
             if n[i] != 0:
                 if p[i][2] == 'NA':
-                    print('\nWarning: There is not available parameter in critical volume calculation (Group %0.0f,'%i, group[i], ')')
-                    print('\nRemark: Contribution from group %0.0f,'%i, group[i], 'will be discarded from calculations. Molar volume value will be affected.')
+                    logger.warning('No parameter available for critical volume calculation (Group %0.0f, %s). Contribution discarded; molar volume will be affected.' % (i, group[i]))
                 else:
                     VC = VC + n[i] * p[i][2]
 
@@ -577,7 +582,7 @@ class StokesRadiusCalculator:
 class DiffusivityCalculator:
     @staticmethod
     def wilke_chang_diffusion_coefficient(molar_volume, molecular_weight, temp, viscosity, alpha):
-        d = (7.4E-8) * temp * np.sqrt(alpha * molecular_weight) / (viscosity * (alpha * molar_volume)**0.6)
+        d = (7.4E-8) * temp * np.sqrt(alpha * molecular_weight) / (viscosity * molar_volume**0.6)
         return d
 
 

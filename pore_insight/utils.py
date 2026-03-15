@@ -1,6 +1,7 @@
 import numpy as np
 from rdkit import Chem
 from typing import List, Union
+from pore_insight import logger
     
 
 def rej_bounds(rejection, error):
@@ -24,8 +25,8 @@ def rej_bounds(rejection, error):
     if len(rejection) != len(error):
         raise IndexError("rejection and error arrays must have the same length")
 
-    rej_low = rejection + error
-    rej_high = rejection - error
+    rej_low = rejection - error
+    rej_high = rejection + error
     return rej_low.tolist(), rej_high.tolist()
 
 
@@ -43,6 +44,6 @@ def read_molecules(molecule_strings: List[str]) -> List[Union[Chem.Mol, None]]:
                     raise ValueError(f"Invalid SMILES string: {mol_str}")
             mols.append(mol)
         except Exception as e:
-            print(f"Error processing molecule string {mol_str}: {e}")
+            logger.warning(f"Error processing molecule string {mol_str}: {e}")
             mols.append(None)
     return mols

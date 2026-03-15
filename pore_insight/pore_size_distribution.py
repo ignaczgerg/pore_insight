@@ -10,6 +10,7 @@ from rdkit.Chem import Descriptors
 from pore_insight.utils import rej_bounds, read_molecules
 from pore_insight.models import CurveModels, DiffusivityCalculator, PSDModels, DistributionModels, MolarVolume, StokesRadiusCalculator, AimarMethods
 from pore_insight.models import Solvents
+from pore_insight import logger
 
 VOLUME_FUNCTIONS = {
                 'schotte': MolarVolume.relation_Schotte,
@@ -65,7 +66,7 @@ class PSD:
             self.alpha = Solvents.get(self.solvent).alpha
             self.solvent_mol_weight = (solvent_mol_weight if solvent_mol_weight is not None
                                      else Solvents.get(self.solvent).solvent_mol_weight)
-            print(f"Solvent: {self.solvent}, alpha: {self.alpha}, molecular weight: {self.solvent_mol_weight}")
+            logger.info(f"Solvent: {self.solvent}, alpha: {self.alpha}, molecular weight: {self.solvent_mol_weight}")
             self.viscosity = viscosity if viscosity is not None else Solvents.get(self.solvent).viscosity
 
         if self.solute_mol_weights is None and self.molecules_structure is None:
@@ -77,41 +78,39 @@ class PSD:
             """
             if method not in VOLUME_FUNCTIONS:
                 raise ValueError(f"Method '{method}' is not recognized. Choose from: {list(VOLUME_FUNCTIONS.keys())}")
-            
+
+            temp_K = self.temperature + 273.15  # Wilke-Chang and Stokes-Einstein require Kelvin
+
             # We prefer the joback method above anything, except when the user provides volumes directly.
             # This is true even if molecular weights are provided.
             if self.molecules_structure is not None:
                 self._get_volume_from_structure(method='joback')
-                self.diffusivity = np.array([DiffusivityCalculator.wilke_chang_diffusion_coefficient(mol_volume, 
-                                                                                                     self.solvent_mol_weight, # This is the solvent, single value.
-                                                                                                     self.temperature, 
-                                                                                                     self.viscosity, 
-                                                                                                     self.alpha) for mol_volume in self.molar_volume])                 
-                # here self.diffusivity is an array of D-s, which are the diffusivity coefficients.
-                self.x_radii = np.array([StokesRadiusCalculator.stokes_einstein_radius(D, self.temperature, self.viscosity) for D in self.diffusivity])
+                self.diffusivity = np.array([DiffusivityCalculator.wilke_chang_diffusion_coefficient(mol_volume,
+                                                                                                     self.solvent_mol_weight,
+                                                                                                     temp_K,
+                                                                                                     self.viscosity,
+                                                                                                     self.alpha) for mol_volume in self.molar_volume])
+                self.x_radii = np.array([StokesRadiusCalculator.stokes_einstein_radius(D, temp_K, self.viscosity) for D in self.diffusivity])
                 return
 
             if self.solute_mol_weights is not None:
                 self.mws = self.solute_mol_weights
                 self.molar_volume = np.array([VOLUME_FUNCTIONS[method](mol) for mol in self.mws])
-                self.diffusivity = np.array([DiffusivityCalculator.wilke_chang_diffusion_coefficient(mol_volume, 
-                                                                                                     self.solvent_mol_weight, # This is the solvent, single value.
-                                                                                                     self.temperature, 
-                                                                                                     self.viscosity, 
-                                                                                                     self.alpha) for mol_volume in self.molar_volume])                 
-                # here self.diffusivity is an array of D-s, which are the diffusivity coefficients.
-                self.x_radii = np.array([StokesRadiusCalculator.stokes_einstein_radius(D, self.temperature, self.viscosity) for D in self.diffusivity])
-            
-            
+                self.diffusivity = np.array([DiffusivityCalculator.wilke_chang_diffusion_coefficient(mol_volume,
+                                                                                                     self.solvent_mol_weight,
+                                                                                                     temp_K,
+                                                                                                     self.viscosity,
+                                                                                                     self.alpha) for mol_volume in self.molar_volume])
+                self.x_radii = np.array([StokesRadiusCalculator.stokes_einstein_radius(D, temp_K, self.viscosity) for D in self.diffusivity])
+
             if self.molar_volume is not None:
-                self.diffusivity = np.array([DiffusivityCalculator.wilke_chang_diffusion_coefficient(mol_volume, 
-                                                                                                     self.solvent_mol_weight, # This is the solvent, single value.
-                                                                                                     self.temperature, 
-                                                                                                     self.viscosity, 
-                                                                                                     self.alpha) for mol_volume in self.molar_volume])                 
-                # here self.diffusivity is an array of D-s, which are the diffusivity coefficients.
-                self.x_radii = np.array([StokesRadiusCalculator.stokes_einstein_radius(D, self.temperature, self.viscosity) for D in self.diffusivity])
-            
+                self.diffusivity = np.array([DiffusivityCalculator.wilke_chang_diffusion_coefficient(mol_volume,
+                                                                                                     self.solvent_mol_weight,
+                                                                                                     temp_K,
+                                                                                                     self.viscosity,
+                                                                                                     self.alpha) for mol_volume in self.molar_volume])
+                self.x_radii = np.array([StokesRadiusCalculator.stokes_einstein_radius(D, temp_K, self.viscosity) for D in self.diffusivity])
+
             elif self.solute_mol_weights is None:
                 raise ValueError("Molecule weights must be provided to calculate volume if molecules_structure is not provided.")
     
@@ -125,7 +124,7 @@ class PSD:
         try:
             self.mws = read_molecules(self.molecules_structure)
         except Exception as e:
-            print(e)
+            logger.warning(f"Failed to read molecule structures: {e}")
             raise ValueError("Invalid molecule structure provided. Check documentation for valid input format.")
         self.molar_volume = np.array([VOLUME_FUNCTIONS[method](mol) for mol in self.mws])
     
@@ -161,8 +160,9 @@ class PSD:
 
         self._model_function = self._model_functions[model_name]
 
+        _scale_guess = 100 if np.max(self.rejection_values) > 1 else 1
         self._initial_params = {
-            'lognormal_CDF': [np.median(self.x_radii),0.1],
+            'lognormal_CDF': [np.median(self.x_radii), 0.1, _scale_guess],
             'boltzmann': [-10, 1, np.median(self.x_radii), 1],  
             'sigmoid': [0.1, np.median(self.x_radii), 1],
             'generalized_logistic': [1, 1, 1, 1, 1, 1],
@@ -171,7 +171,7 @@ class PSD:
         }
 
         self._bounds = {
-            'lognormal_CDF': ([0,0], [np.inf, np.inf]),
+            'lognormal_CDF': ([0, 0, 0], [np.inf, np.inf, np.inf]),
             'boltzmann': ([-np.inf, 0, 0, 0], [np.inf, np.inf, np.inf, np.inf]),
             'sigmoid': ([0, 0, 0], [np.inf, np.inf, np.inf]),
             'generalized_logistic': ([0, 0, 0, 0, 0, 0], [np.inf, np.inf, np.inf, np.inf, np.inf, np.inf]),
@@ -179,7 +179,7 @@ class PSD:
             'double_sigmoid': ([0, 0, 0, 0, 0, 0], [np.inf, np.inf, np.inf, np.inf, np.inf, np.inf])
         }
 
-        self.radii_range = np.linspace(0,max(self.x_radii)*2,100)
+        self.radii_range = np.linspace(min(self.x_radii) * 0.1, max(self.x_radii) * 2, 100)
 
         if self.errors is not None:
             low_bound, high_bound = rej_bounds(self.rejection_values,self.errors)
@@ -210,7 +210,7 @@ class PSD:
         """
         self._model_derivative_functions = {
             'boltzmann': PSDModels.derivative_boltzmann,
-            'log_normal': PSDModels.log_normal, 
+            'lognormal_CDF': PSDModels.log_normal,
             'sigmoid': PSDModels.derivative_sigmoid,
             'generalized_logistic': PSDModels.derivative_generalized_logistic,
             'gompertz': PSDModels.derivative_gompertz,
@@ -362,7 +362,7 @@ class TwoPointPSD:
         using the found parameters r_star, sigma.
         """
 
-        if self.r_star and self.sigma is not None:
+        if self.r_star is not None and self.sigma is not None:
             lambda_star = a / self.r_star
             self.prediction = {
                 'solute_radius' : a,
