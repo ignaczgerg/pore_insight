@@ -10,4 +10,5 @@ nature.mplstyle
 images/*
 data/*
 example.py
+.DS_Store/
 .DS_Store
